@@ -44,7 +44,7 @@ Built entirely on the client side using **Next.js**, **Mammoth.js**, and **docx.
 
 ## For Developers  
 
-**Live Demo:** [https://formatdaddy.pages.dev](https://formatdaddy.pages.dev)  
+**Live Demo:** [https://formatdaddy.vercel.app](FormatDaddy)  
 
 ###  Run Locally  
 ```bash
