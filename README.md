@@ -52,3 +52,14 @@ git clone https://github.com/<your-username>/formatdaddy
 cd formatdaddy
 npm install
 npm run dev
+```
+
+Then open http://localhost:3000 in your browser.
+
+ Made for students, by a student
+
+---
+
+## Privacy
+FormatDaddy processes everything locally in your browser.
+Your document never leaves your device, ensuring complete privacy and security.
