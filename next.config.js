@@ -1,9 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: "export", // enables static HTML export
-  images: { unoptimized: true }, // since GitHub Pages doesn’t support Next Image optimization
-  basePath: "/FormatDaddy", // repo name
-  assetPrefix: "/FormatDaddy/",
+  // remove `output: "export"` unless you intentionally want a static export
+  // output: "export",
+  images: { unoptimized: true }, // ok to keep if you want client-side images
 };
 
 export default nextConfig;
