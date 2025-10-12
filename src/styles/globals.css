@@ -1,210 +1,154 @@
-/* styles/global.css
-   Solid, premium "brand" look — dark theme + red accent (Netflix-like)
-   Uses Poppins for headings and Inter-ish for body
+/* globals.css
+   Global variables + global classes (plain className usage)
 */
 
-/* Load font (fast, from Google) */
+/* Load fonts */
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&family=Inter:wght@300;400;600&display=swap');
 
-:root{
-  --bg: #0b0b0b;            /* very dark background */
-  --card: #0f1113;          /* card background */
-  --muted: #98a0aa;         /* muted text */
-  --text: #e6eef6;          /* primary text color */
-  --accent: #e50914;        /* Netflix-red like */
-  --accent-strong: #b20a10; /* darker red for pressed */
+:root {
+  /* Color + spacing system */
+  --bg: #0b0b0b;
+  --card: #0f1113;
+  --muted: #98a0aa;
+  --text: #e6eef6;
+  --accent: #e50914;
+  --accent-strong: #b20a10;
   --glass: rgba(255,255,255,0.03);
   --radius: 12px;
-  --shadow-1: 0 8px 24px rgba(2,6,23,0.65);
+  --shadow-1: 0 8px 28px rgba(2,6,23,0.7);
   --input-bg: #0a0a0b;
   --border: rgba(255,255,255,0.04);
+
+  /* layout variables (these can be overridden by CSS module if needed) */
+  --sidebar-width: 35%;
+  --sidebar-min: 300px;
+  --gutter: 28px;
 }
 
-/* Base layout */
-* { box-sizing: border-box; }
-html,body,#__next { height:100%; }
+/* Base */
+* { box-sizing: border-box; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }
+html, body, #__next { height: 100%; }
 body {
-  margin:0;
+  margin: 0;
+  min-height: 100vh;
   background: var(--bg);
   color: var(--text);
   font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  -webkit-font-smoothing:antialiased;
-  -moz-osx-font-smoothing:grayscale;
-  line-height:1.45;
+  line-height: 1.45;
 }
 
-/* central container */
-.container {
-  width: 940px;
-  max-width: calc(100% - 48px);
-  margin: 56px auto;
-  background: var(--card);
-  border-radius: 14px;
-  box-shadow: var(--shadow-1);
-  padding: 36px;
-  border: 1px solid rgba(255,255,255,0.03);
-}
+/* Typography helpers */
+.h1 { font-family: "Poppins", "Inter", sans-serif; font-weight:700; margin:0; color:var(--text); }
+.muted { color: var(--muted); }
 
-/* header */
-h1 {
-  font-family: "Poppins", "Inter", sans-serif;
-  font-weight: 700;
-  color: var(--text);
-  text-align:center;
-  margin: 0 0 18px;
-  font-size: 34px;
-  letter-spacing: -0.02em;
-}
-.container .subtitle {
-  text-align:center;
-  margin-bottom: 20px;
-  color: var(--muted);
-  font-weight: 300;
-}
-/* make .tagline and .subtitle share the same styles */
-.container .tagline {
-  text-align: center;
-  margin-bottom: 20px;
-  color: var(--muted);
-  font-weight: 300;
-}
-
-
-/* drop zone — solid, subtle border */
-.drop-zone {
-  border-radius: 10px;
-  padding: 28px;
-  border: 1px dashed rgba(255,255,255,0.06);
-  background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.00));
-  display: flex;
+/* Buttons (global) */
+.btn {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--muted);
-  font-size: 15px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 14px;
   cursor: pointer;
-  transition: box-shadow .18s ease, transform .12s ease, border-color .12s ease;
-  margin-bottom: 22px;
-}
-.drop-zone:hover {
-  box-shadow: 0 8px 30px rgba(0,0,0,0.6);
-  transform: translateY(-2px);
-  border-color: rgba(229,9,20,0.18);
+  user-select: none;
+  border: none;
+  transition: transform .12s ease, box-shadow .12s ease, opacity .12s ease;
 }
 
-/* form layout */
-.form-row {
-  display:flex;
-  align-items:center;
-  gap:12px;
-  margin-bottom:14px;
+.btn--primary {
+  background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+  color: #fff;
+  box-shadow: 0 8px 28px rgba(229,9,20,0.18);
 }
-.form-row label {
-  width: 150px;
-  color: var(--muted);
-  font-weight:600;
-  font-size:14px;
-}
-.form-row input[type="text"],
-.form-row input[type="number"],
-.form-row select {
-  flex:1;
-  padding:10px 12px;
+.btn--primary:hover { transform: translateY(-2px); box-shadow: 0 12px 34px rgba(229,9,20,0.22); }
+.btn--primary:active { transform: translateY(0); box-shadow: 0 6px 14px rgba(0,0,0,0.45); }
+
+/* Inputs (global fallback) */
+.input, input, select, textarea {
+  width: 100%;
+  padding: 10px 12px;
   border-radius: 8px;
   background: var(--input-bg);
   border: 1px solid var(--border);
   color: var(--text);
-  outline: none;
-  transition: border-color .12s ease, box-shadow .12s ease;
   font-size: 14px;
+  outline: none;
+  transition: box-shadow .12s ease, border-color .12s ease;
 }
-.form-row input:focus, .form-row select:focus {
+.input:focus, input:focus, select:focus, textarea:focus {
   border-color: rgba(229,9,20,0.9);
-  box-shadow: 0 6px 18px rgba(229,9,20,0.08);
+  box-shadow: 0 8px 28px rgba(229,9,20,0.08);
 }
 
-/* big primary button — Netflix-ish red */
-button.format-btn, button.download-btn {
-  --pad-y: 12px;
-  display:inline-block;
-  padding: var(--pad-y) 18px;
-  border-radius: 8px;
-  border: none;
-  background: linear-gradient(90deg, var(--accent), var(--accent-strong));
-  color: white;
-  font-weight:700;
-  cursor:pointer;
-  box-shadow: 0 6px 20px rgba(229,9,20,0.18);
-  transition: transform .12s ease, box-shadow .12s ease, opacity .12s ease;
-  font-size: 15px;
-}
-button.format-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 34px rgba(229,9,20,0.20);
-}
-button.format-btn:active {
-  transform: translateY(0);
-  box-shadow: 0 6px 16px rgba(0,0,0,0.6);
-  background: var(--accent-strong);
+/* Container utility */
+.container { max-width: 1200px; margin: 0 auto; padding: var(--gutter); }
+
+/* Progress keyframes (global) */
+@keyframes fd-progress {
+  from { width: 0%; }
+  to   { width: 100%; }
 }
 
-/* progress bars — strong, minimal */
-.progress-container {
-  margin-top: 18px;
-}
-.progress-label {
-  color: var(--muted);
-  font-size:13px;
-  margin-bottom:8px;
-}
+/* ---- Global classes used by JSX (non-module selectors) ---- */
+
+/* Progress container & bar */
+.progress-container { margin-top: 12px; width: 100%; }
+.progress-label { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+
 .progress-bar {
+  position: relative;
   height: 10px;
   background: rgba(255,255,255,0.03);
   border-radius: 6px;
   overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.02);
 }
-.progress-bar::after{
-  content:"";
-  display:block;
-  height:100%;
-  width:0;
+.progress-bar::after {
+  content: "";
+  position: absolute;
+  left: 0; top: 0;
+  height: 100%;
+  width: 0%;
   background: linear-gradient(90deg, #ffd6d6, var(--accent));
-  transition: width 1.2s ease;
+  border-radius: 6px;
+  transition: width 0.36s ease;
+  will-change: width;
 }
+.progress-bar.uploading::after { animation: fd-progress 1.2s forwards; }
+.progress-bar.processing::after { animation: fd-progress 3s forwards; }
 
-/* small download section and preview */
-.download-section {
-  margin-top: 22px;
-  display:flex;
-  flex-direction:column;
-  gap:12px;
-}
-.preview {
-  border-radius: 8px;
-  background: rgba(255,255,255,0.02);
-  padding: 14px;
-  color: var(--text);
-  border: 1px solid rgba(255,255,255,0.03);
-  max-height: 360px;
-  overflow:auto;
-  font-size: 15px;
-  line-height: 1.6;
-}
+/* formGroup plain class */
+.formGroup, .form-group { display:flex; flex-direction:column; gap:8px; margin-bottom:10px; }
+.formGroup label, .form-group label { color: var(--muted); font-weight:600; font-size:13px; }
 
-/* small helpers */
+/* Sidebar actions (plain .actions used in JSX) */
+.actions { display:flex; flex-direction:column; gap:12px; margin-top:12px; width:100%; align-items:stretch; }
+.actions .btn { width:100%; padding: 12px 14px; border-radius:10px; font-weight:700; }
+
+/* Disabled look for global actions */
+.actions .btn[aria-disabled="true"] { opacity: 0.6; cursor: not-allowed; transform: none; box-shadow: none; }
+
+/* Drop-zone global fallback */
+.drop-zone, .dropZone { border-radius:10px; padding:18px; border:1px dashed rgba(255,255,255,0.06); background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.00)); display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:15px; cursor:pointer; transition: box-shadow .18s ease, transform .12s ease; }
+
+/* Misc */
 .small-muted { color: var(--muted); font-size:13px; }
-.flex-row { display:flex; gap:12px; align-items:center; }
 
-/* responsive */
-@media (max-width:880px) {
-  .container { padding:20px; margin: 24px; }
-  .form-row { flex-direction: column; align-items:stretch; }
-  .form-row label { width:100%; }
-  h1 { font-size: 28px; }
+/* Responsive helpers (global) */
+@media (max-width: 880px) {
+  :root { --sidebar-width: 38%; }
+}
+@media (max-width: 600px) {
+  :root { --sidebar-width: 100%; }
 }
 
-@keyframes progress {
-  to { width: 100%; }
-}
-.progress-bar.processing::after {
-  animation: progress 3s forwards;
+/* Global focus styles (moved from module file) */
+input:focus,
+select:focus,
+.btn:focus,
+.dropZone:focus,
+.drop-zone:focus {
+  outline: 3px solid rgba(229,9,20,0.12);
+  outline-offset: 2px;
 }

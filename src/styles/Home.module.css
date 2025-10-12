@@ -1,168 +1,327 @@
-.page {
-  --gray-rgb: 0, 0, 0;
-  --gray-alpha-200: rgba(var(--gray-rgb), 0.08);
-  --gray-alpha-100: rgba(var(--gray-rgb), 0.05);
+/* home.module.css
+   Module-scoped layout & component styles for formatdaddy page.
+   No :root here — variables come from globals.css
+*/
 
-  --button-primary-hover: #383838;
-  --button-secondary-hover: #f2f2f2;
-
-  display: grid;
-  grid-template-rows: 20px 1fr 20px;
-  align-items: center;
-  justify-items: center;
-  min-height: 100svh;
-  padding: 80px;
-  gap: 64px;
-  font-family: var(--font-geist-sans);
+/* Page wrapper (module-scoped) */
+.pageContainer {
+  height: 100vh;
+  width: 100%;
+  overflow: hidden;
+  display: block;
 }
 
-@media (prefers-color-scheme: dark) {
-  .page {
-    --gray-rgb: 255, 255, 255;
-    --gray-alpha-200: rgba(var(--gray-rgb), 0.145);
-    --gray-alpha-100: rgba(var(--gray-rgb), 0.06);
-
-    --button-primary-hover: #ccc;
-    --button-secondary-hover: #1a1a1a;
-  }
-}
-
-.main {
+/* Sidebar (module scope) */
+.sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-min);
+  background: linear-gradient(180deg, rgba(255,255,255,0.012), rgba(255,255,255,0.006)), var(--card);
+  border-right: 1px solid rgba(255,255,255,0.06);
+  box-shadow: 0 6px 24px rgba(0,0,0,0.4);
+  padding: 28px;
+  padding-top: 36px;
+  z-index: 1200;
   display: flex;
   flex-direction: column;
-  gap: 32px;
-  grid-row-start: 2;
+  gap: 12px;
+  overflow: hidden; /* no scrollbar on the sidebar */
 }
 
-.main ol {
-  font-family: var(--font-geist-mono);
-  padding-left: 0;
-  margin: 0;
-  font-size: 14px;
-  line-height: 24px;
-  letter-spacing: -0.01em;
-  list-style-position: inside;
+/* Sidebar header text */
+.sidebar h2 {
+  font-family: "Poppins", "Inter", sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0 0 6px 0;
+  color: var(--text);
+}
+.tagline {
+  color: var(--muted);
+  margin-bottom: 14px;
+  font-size: 13px;
 }
 
-.main li:not(:last-of-type) {
-  margin-bottom: 8px;
+/* Sidebar label tweak (module) */
+.sidebar .formGroup { margin-bottom: 10px; }
+.sidebar label { font-size: 13px; font-weight: 600; color: var(--muted); }
+
+/* Sidebar open/closed (module-scoped) */
+.open {
+  display: block;
+  transform: none;
+  transition: all 220ms ease;
+}
+.closed {
+  display: none;
+  transition: all 220ms ease;
 }
 
-.main code {
-  font-family: inherit;
-  background: var(--gray-alpha-100);
-  padding: 2px 4px;
-  border-radius: 4px;
-  font-weight: 600;
-}
-
-.ctas {
-  display: flex;
-  gap: 16px;
-}
-
-.ctas a {
-  appearance: none;
-  border-radius: 128px;
-  height: 48px;
-  padding: 0 20px;
-  border: none;
-  border: 1px solid transparent;
-  transition:
-    background 0.2s,
-    color 0.2s,
-    border-color 0.2s;
+/* Toggle button inside sidebar (module-scoped) */
+.sidebarToggle {
+  display: none;               /* visible only under breakpoint below */
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.05);
+  color: var(--text);
+  padding: 6px 8px;
+  border-radius: 8px;
   cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  z-index: 1300;
+}
+
+/* Workspace (module-scoped) */
+.workspace {
+  margin-left: var(--sidebar-width);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 36px 48px;
+  gap: 20px;
+  box-sizing: border-box;
+  overflow: hidden; /* internal sections handle their own scrolling */
+}
+
+/* Upload area (module) */
+.upload {
+  flex: 0 0 30%;
+  min-height: 160px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.00));
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.03);
+  padding: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
-  line-height: 20px;
-  font-weight: 500;
+  gap: 12px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+  position: relative;
 }
 
-a.primary {
-  background: var(--foreground);
-  color: var(--background);
-  gap: 8px;
-}
-
-a.secondary {
-  border-color: var(--gray-alpha-200);
-  min-width: 158px;
-}
-
-.footer {
-  grid-row-start: 3;
-  display: flex;
-  gap: 24px;
-}
-
-.footer a {
+/* dropZone (module scope but plain .dropZone is used globally too) */
+.dropZone {
+  width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  border: 1px dashed rgba(255,255,255,0.06);
+  border-radius: 10px;
+  cursor: pointer;
+  color: var(--muted);
+  padding: 18px;
+  transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+  background: linear-gradient(180deg, rgba(255,255,255,0.006), rgba(255,255,255,0.002));
+}
+.dropZone:hover { transform: translateY(-2px); border-color: rgba(229,9,20,0.14); box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+
+/* Preview (module-scoped) */
+.preview {
+  flex: 1;
+  background: rgba(255,255,255,0.02);
+  border-radius: 12px;
+  padding: 20px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border: 1px solid rgba(255,255,255,0.03);
+  color: var(--text);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+  line-height: 1.6;
+  -webkit-overflow-scrolling: touch;
 }
 
-.footer img {
-  flex-shrink: 0;
+/* Preview content readability */
+.preview h1, .preview h2, .preview h3 { font-family: "Poppins", sans-serif; margin: 6px 0; color: var(--text); }
+.preview p, .preview li { color: var(--text); font-size: 15px; margin: 6px 0; }
+.preview img, .preview table { max-width: 100%; height: auto; }
+
+/* Controls grid inside sidebar (module) */
+.controlsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  width: 100%;
+}
+.controlsGrid .field { display: flex; flex-direction: column; gap: 6px; }
+.controlsGrid label { color: var(--muted); font-weight: 600; font-size: 13px; }
+
+/* Responsive behavior (module) */
+
+/* Medium screens */
+@media (max-width: 1100px) {
+  .sidebar { min-width: 260px; width: 38%; padding: 22px; }
+  .workspace { margin-left: 38%; padding: 24px; }
+  .upload { min-height: 140px; }
+  .sidebarToggle { top: 12px; right: 12px; }
 }
 
-/* Enable hover only on non-touch devices */
-@media (hover: hover) and (pointer: fine) {
-  a.primary:hover {
-    background: var(--button-primary-hover);
-    border-color: transparent;
+/* Small screens: show toggle & collapse behavior */
+@media (max-width: 880px) {
+  .sidebar {
+    position: relative;
+    width: 100%;
+    height: auto;
+    min-width: 0;
+    padding: 18px;
+    display: block;
+    border-right: none;
+    box-shadow: none;
   }
+  .workspace {
+    margin-left: 0;
+    padding: 18px;
+    height: auto;
+    min-height: calc(100vh - 220px);
+  }
+  .upload { flex: 0 0 auto; height: auto; min-height: 120px; }
+  .preview { flex: 1 1 auto; max-height: 60vh; overflow-y: auto; }
 
-  a.secondary:hover {
-    background: var(--button-secondary-hover);
-    border-color: transparent;
-  }
+  /* Show the toggle button on small screens */
+  .sidebarToggle { display: inline-flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
 
-  .footer a:hover {
-    text-decoration: underline;
-    text-underline-offset: 4px;
+  /* If you keep .actions as global, global rule will manage layout; module side actions fallback below */
+  .actions {
+    flex-direction: row;
+    gap: 10px;
   }
+  .actions .btn { flex: 1; }
 }
 
+/* Very small phones */
 @media (max-width: 600px) {
-  .page {
-    padding: 32px;
-    padding-bottom: 80px;
-  }
+  .workspace { padding: 14px; min-height: calc(100vh - 200px); }
+  .preview { max-height: 55vh; padding: 14px; }
+  .sidebar { padding: 14px; }
+  .controlsGrid { grid-template-columns: 1fr; }
+}
 
-  .main {
-    align-items: center;
-  }
+/* Flash animation for download button when status === "done" */
+@keyframes flash-highlight {
+  0%   { box-shadow: 0 0 0 rgba(229,9,20,0); transform: translateY(0); }
+  25%  { box-shadow: 0 10px 36px rgba(229,9,20,0.30); transform: translateY(-3px); }
+  60%  { box-shadow: 0 8px 28px rgba(229,9,20,0.20); transform: translateY(0.5px); }
+  100% { box-shadow: 0 8px 28px rgba(229,9,20,0.18); transform: translateY(0); }
+}
 
-  .main ol {
-    text-align: center;
-  }
+.flash {
+  animation: flash-highlight 1.2s ease;
+}
 
-  .ctas {
-    flex-direction: column;
-  }
+/* -----------------------------
+   Sidebar toggle + collapse (small screens)
+   ----------------------------- */
 
-  .ctas a {
-    font-size: 14px;
-    height: 40px;
-    padding: 0 16px;
-  }
+/* toggle button (hidden on desktop, visible on small screens) */
+.sidebarToggle {
+  display: none;               /* visible only under breakpoint below */
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.05);
+  color: var(--text);
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  z-index: 1300;
+}
 
-  a.secondary {
-    min-width: auto;
-  }
-
-  .footer {
-    flex-wrap: wrap;
+/* On small screens show the toggle */
+@media (max-width: 880px) {
+  .sidebarToggle {
+    display: inline-flex;
     align-items: center;
     justify-content: center;
+    backdrop-filter: blur(4px);
   }
 }
 
-@media (prefers-color-scheme: dark) {
-  .logo {
-    filter: invert();
+/* .open / .closed control the sidebar visibility (module-scoped) */
+/* By default (desktop/tablet) your existing sidebar rules apply.
+   We only need the closed/display control to act on narrow viewports. */
+.open {
+  display: block;
+  transform: none;
+  transition: all 220ms ease;
+}
+
+.closed {
+  display: none;
+  transition: all 220ms ease;
+}
+
+/* -----------------------------
+   Flash animation for download button when status === "done"
+   ----------------------------- */
+
+/* subtle highlight animation */
+@keyframes flash-highlight {
+  0%   { box-shadow: 0 0 0 rgba(229,9,20,0); transform: translateY(0); }
+  25%  { box-shadow: 0 10px 36px rgba(229,9,20,0.30); transform: translateY(-3px); }
+  60%  { box-shadow: 0 8px 28px rgba(229,9,20,0.20); transform: translateY(0.5px); }
+  100% { box-shadow: 0 8px 28px rgba(229,9,20,0.18); transform: translateY(0); }
+}
+
+.flash {
+  animation: flash-highlight 1.2s ease;
+}
+
+/* Make `.closed` actually hide only on small screens */
+@media (max-width: 880px) {
+  /* hide sidebar when closed on small screens */
+  .closed {
+    display: none !important;
+    transform: translateX(-8px);
+    opacity: 0;
+    transition: opacity 180ms ease, transform 180ms ease;
   }
+
+  /* when closed, show the reveal floating button (we also render it via React) */
+  .sidebarReveal {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    z-index: 1400;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(90deg, rgba(0,0,0,0.35), rgba(255,255,255,0.02));
+    color: var(--text);
+    border: 1px solid rgba(255,255,255,0.06);
+    padding: 8px 10px;
+    border-radius: 10px;
+    font-size: 18px;
+    cursor: pointer;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+    backdrop-filter: blur(6px);
+  }
+}
+
+/* On larger screens ensure .closed doesn't remove the sidebar layout */
+@media (min-width: 881px) {
+  .closed {
+    /* treat closed as a soft state on desktop (keeps layout intact) */
+    display: block;
+    opacity: 1;
+    transform: none;
+  }
+  /* hide the reveal button at larger sizes (optional) */
+  .sidebarReveal {
+    display: none;
+  }
+}
+
+/* tiny animation for reveal button hover */
+.sidebarReveal:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 36px rgba(229,9,20,0.14);
 }
