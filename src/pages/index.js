@@ -488,6 +488,14 @@ try {
   console.warn("Failed to restore table tblPrs:", e);
 }
 
+// after: restoreTableTblPrsIfMissing(docDom, originalTblPrs);
+try {
+  ensureExplicitTableBorders(docDom);
+  convertAnchorsToInline(docDom);
+} catch (e) {
+  console.warn("Post-format doc adjustments failed:", e);
+}
+
 try {
   restoreImageExtentsToDom(docDom, docRelMap, docRIdExtents);
 } catch (e) {
@@ -588,6 +596,86 @@ function restoreTableTblPrsIfMissing(dom, originalTblPrs) {
   }
 }
 
+// Add near your other namespace/constants:
+const WP_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing";
+
+// Ensure tables have explicit borders (Quick Look-friendly)
+const ensureExplicitTableBorders = (dom) => {
+  try {
+    const tbls = dom.getElementsByTagName("w:tbl");
+    for (let i = 0; i < tbls.length; i++) {
+      const tbl = tbls[i];
+      // find or create tblPr
+      let tblPr = null;
+      for (let j = 0; j < tbl.childNodes.length; j++) {
+        if (tbl.childNodes[j].nodeName === "w:tblPr") {
+          tblPr = tbl.childNodes[j];
+          break;
+        }
+      }
+      if (!tblPr) {
+        tblPr = createEl(dom, "tblPr");
+        tbl.insertBefore(tblPr, tbl.firstChild);
+      }
+
+      // if no tblBorders, add a simple visible border set
+      const existingBorders = Array.from(tblPr.childNodes).find(n => n.nodeName === "w:tblBorders");
+      if (!existingBorders) {
+        const tblBorders = createEl(dom, "tblBorders");
+        const sides = ["top", "left", "bottom", "right", "insideH", "insideV"];
+        for (const s of sides) {
+          const el = createEl(dom, s);
+          // Single-line black border; tweak w:sz if you want thicker
+          el.setAttribute("w:val", "single");
+          el.setAttribute("w:sz", "4");        // 4 half-points => 2pt; adjust if needed
+          el.setAttribute("w:color", "000000");
+          tblBorders.appendChild(el);
+        }
+        tblPr.appendChild(tblBorders);
+      }
+    }
+  } catch (e) {
+    console.warn("ensureExplicitTableBorders failed:", e);
+  }
+};
+
+// Convert floating/anchored drawings to inline drawings to avoid overlap in previews
+const convertAnchorsToInline = (dom) => {
+  try {
+    // snapshot list because we'll be replacing nodes
+    const anchors = Array.from(dom.getElementsByTagName("wp:anchor"));
+    for (const anchor of anchors) {
+      // create a wp:inline element in the same namespace
+      const inline = dom.createElementNS(anchor.namespaceURI || WP_NS, "wp:inline");
+
+      // copy attributes
+      for (let a = 0; a < anchor.attributes.length; a++) {
+        const at = anchor.attributes[a];
+        inline.setAttribute(at.name, at.value);
+      }
+
+      // move children into inline (this preserves extent, graphic, etc.)
+      while (anchor.firstChild) {
+        inline.appendChild(anchor.firstChild);
+      }
+
+      // remove any wrapping instructions that only make sense for anchors
+      // (e.g. <wp:wrap ...>) — transform them to nothing for inline images
+      const wraps = inline.getElementsByTagName("wp:wrap");
+      for (let w = wraps.length - 1; w >= 0; w--) {
+        const node = wraps[w];
+        node.parentNode && node.parentNode.removeChild(node);
+      }
+
+      // replace anchor with inline (if anchor has a parent)
+      if (anchor.parentNode) {
+        anchor.parentNode.replaceChild(inline, anchor);
+      }
+    }
+  } catch (e) {
+    console.warn("convertAnchorsToInline failed:", e);
+  }
+};
 
 
 // sanitize XML strings before writing to zip
@@ -889,6 +977,9 @@ try {
   // If formatting fails, keep original instead of writing broken output
   continue;
 }
+// inside header loop, before serialize/write
+ensureExplicitTableBorders(dom);
+convertAnchorsToInline(dom);
 const out = new XMLSerializer().serializeToString(dom);
 zip.file(hf, ensureXmlDecl(sanitizeXmlBeforeWrite(out)));
 }
@@ -918,6 +1009,10 @@ try {
   console.warn(`applyFormattingToHeaderFooterDom failed for ${ff}:`, e);
   continue;
 }
+// inside header loop, before serialize/write
+ensureExplicitTableBorders(dom);
+convertAnchorsToInline(dom);
+
 const out = new XMLSerializer().serializeToString(dom);
 zip.file(ff, ensureXmlDecl(sanitizeXmlBeforeWrite(out)));
 }
