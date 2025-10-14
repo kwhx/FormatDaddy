@@ -330,7 +330,13 @@ const handleFormat = async () => {
   // Serialize and write back document.xml
   const serializer = new XMLSerializer();
   const updatedDocumentXml = serializer.serializeToString(docDom);
-  writeText("word/document.xml", updatedDocumentXml);
+  // ensure an XML declaration exists (some parsers expect it)
+  const ensureXmlDecl = (xmlString) => {
+  if (!xmlString) return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
+  if (xmlString.trim().startsWith("<?xml")) return xmlString;
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + xmlString;
+};
+writeText("word/document.xml", ensureXmlDecl(updatedDocumentXml));
 
   // 3) Update headers & footers if present (async)
   const fileNames = Object.keys(zip.files);
@@ -343,7 +349,7 @@ const handleFormat = async () => {
     const dom = parser.parseFromString(xml, "application/xml");
     await applyFormattingToHeaderFooterDom(dom, font, fontSize, alignment, spacing);
     const out = serializer.serializeToString(dom);
-    writeText(hf, out);
+    writeText(hf, ensureXmlDecl(out));
   }
   for (const ff of footerFiles) {
     const xml = await readText(ff);
@@ -351,56 +357,90 @@ const handleFormat = async () => {
     const dom = parser.parseFromString(xml, "application/xml");
     await applyFormattingToHeaderFooterDom(dom, font, fontSize, alignment, spacing);
     const out = serializer.serializeToString(dom);
-    writeText(ff, out);
+    writeText(ff, ensureXmlDecl(out));
   }
 
   // 4) Generate new docx blob from zip and produce preview from that same blob
+  
+  // --- ZIP generate + validation (DEFLATE first, fallback to STORE) ---
+try {
+  const tryGenerate = async (opts) => {
+    return await zip.generateAsync(opts);
+  };
+
+  let finalBlob = null;
+  const msTimeout = 25000; // 25s for generation (adjust if needed)
+
+  // Attempt DEFLATE first (no streaming) — most compatible
   try {
-    // adaptive zip options: for mobile or big files, avoid compression
-    const mobile = isLikelyMobile();
-    const useStore = mobile || (file && file.size > 5 * 1024 * 1024); // >5MB -> use STORE
-    const zipOptions = { type: "blob", streamFiles: true, compression: useStore ? "STORE" : "DEFLATE" };
+    const blob = await promiseWithTimeout(
+      tryGenerate({ type: "blob", compression: "DEFLATE", streamFiles: false }),
+      msTimeout
+    );
 
-    // wrap generateAsync with a timeout — if it times out, retry with STORE if not already using it
-    let newBlob;
+    // validate by trying to open the produced blob
     try {
-      newBlob = await promiseWithTimeout(zip.generateAsync(zipOptions), 20000); // 20s timeout
-    } catch (zipErr) {
-      console.warn("zip.generateAsync timeout or error, retrying with STORE:", zipErr);
-      // retry with store (no compression)
-      try {
-        newBlob = await promiseWithTimeout(zip.generateAsync({ type: "blob", streamFiles: true, compression: "STORE" }), 20000);
-      } catch (retryErr) {
-        console.error("Zip retry failed:", retryErr);
-        throw retryErr;
-      }
+      await JSZip.loadAsync(blob);
+      finalBlob = blob;
+      console.log("Zip generation: DEFLATE produced a valid archive");
+    } catch (valErr) {
+      console.warn("DEFLATE produced archive failed JSZip validation:", valErr);
     }
-
-    // Attempt preview, but don't block forever — use timeout
-    try {
-      const modifiedArrayBuffer = await newBlob.arrayBuffer();
-      // mammoth sometimes takes long on mobile; add timeout
-      try {
-        const mammothPromise = mammoth.convertToHtml({ arrayBuffer: modifiedArrayBuffer }, {
-          convertImage: mammoth.images.inline((image) => image.read("base64").then(b64 => ({ src: `data:${image.contentType};base64,${b64}` })))
-        });
-        const mammothResult = await promiseWithTimeout(mammothPromise, 12000); // 12s timeout
-        setHtmlContent(mammothResult.value);
-      } catch (previewErr) {
-        // preview failed or timed out — skip it (we still provide the file)
-        console.warn("Preview of modified doc failed or timed out:", previewErr);
-      }
-    } catch (previewErr) {
-      console.warn("Could not preview modified doc (arrayBuffer conversion failed):", previewErr);
-    }
-
-    setDocBlob(newBlob);
-    setStatus("done");
-  } catch (err) {
-    console.error("Failed to generate modified docx:", err);
-    alert("Failed to generate formatted DOCX: " + (err && err.message ? err.message : String(err)));
-    setStatus("idle");
+  } catch (errDE) {
+    console.warn("DEFLATE generateAsync timed out or errored; will attempt STORE:", errDE);
   }
+
+  // fallback: STORE (no compression) — still no streaming
+  if (!finalBlob) {
+    try {
+      const blob = await promiseWithTimeout(
+        tryGenerate({ type: "blob", compression: "STORE", streamFiles: false }),
+        msTimeout
+      );
+      // validate
+      await JSZip.loadAsync(blob); // throws if invalid
+      finalBlob = blob;
+      console.log("Zip generation: STORE produced a valid archive (fallback)");
+    } catch (errStore) {
+      console.error("Both DEFLATE and STORE generation failed or timed out:", errStore);
+      throw errStore;
+    }
+  }
+
+  // wrap in docx MIME type (helps iOS Quick Look)
+  const typedDocx = new Blob([await finalBlob.arrayBuffer()], {
+    type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  });
+
+  // Optional debug: list some top-level entries so you can inspect logs
+  try {
+    const check = await JSZip.loadAsync(typedDocx);
+    console.log("Generated docx entries:", Object.keys(check.files).slice(0, 30));
+  } catch (chkErr) {
+    console.warn("Validation read-back failed after final blob:", chkErr);
+    // we already validated above; if this fails here, still continue to hand user the file
+  }
+
+  // Attempt preview with mammoth (non-blocking, timed)
+  try {
+    const modifiedArrayBuffer = await typedDocx.arrayBuffer();
+    const mammothPromise = mammoth.convertToHtml({ arrayBuffer: modifiedArrayBuffer }, {
+      convertImage: mammoth.images.inline((image) => image.read("base64").then(b64 => ({ src: `data:${image.contentType};base64,${b64}` })))
+    });
+    const mammothResult = await promiseWithTimeout(mammothPromise, 12000); // 12s preview timeout
+    setHtmlContent(mammothResult.value);
+  } catch (previewErr) {
+    console.warn("Preview failed or timed out — continuing with download-ready file:", previewErr);
+  }
+
+  setDocBlob(typedDocx);
+  setStatus("done");
+} catch (err) {
+  console.error("Failed to generate or validate DOCX:", err);
+  alert("Failed to generate formatted DOCX: " + (err && err.message ? err.message : String(err)));
+  setStatus("idle");
+}
+
 }; // handleFormat
 
 
