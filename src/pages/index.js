@@ -640,34 +640,60 @@ const ensureExplicitTableBorders = (dom) => {
 };
 
 // Convert floating/anchored drawings to inline drawings to avoid overlap in previews
+// Convert floating/anchored drawings to inline drawings to avoid overlap in previews
 const convertAnchorsToInline = (dom) => {
   try {
     // snapshot list because we'll be replacing nodes
     const anchors = Array.from(dom.getElementsByTagName("wp:anchor"));
+    let nextDocPrId = 1;
+
     for (const anchor of anchors) {
-      // create a wp:inline element in the same namespace
-      const inline = dom.createElementNS(anchor.namespaceURI || WP_NS, "wp:inline");
+      // create a wp:inline element in the correct namespace (important)
+      const inline = dom.createElementNS(WP_NS, "wp:inline");
 
-      // copy attributes
-      for (let a = 0; a < anchor.attributes.length; a++) {
-        const at = anchor.attributes[a];
-        inline.setAttribute(at.name, at.value);
-      }
-
-      // move children into inline (this preserves extent, graphic, etc.)
+      // Move children from anchor -> inline (preserve graphic, extent, etc.)
       while (anchor.firstChild) {
         inline.appendChild(anchor.firstChild);
       }
 
-      // remove any wrapping instructions that only make sense for anchors
-      // (e.g. <wp:wrap ...>) — transform them to nothing for inline images
-      const wraps = inline.getElementsByTagName("wp:wrap");
-      for (let w = wraps.length - 1; w >= 0; w--) {
-        const node = wraps[w];
-        node.parentNode && node.parentNode.removeChild(node);
+      // Ensure wp:extent exists with numeric cx/cy (Quick Look stretches without them)
+      let extent = inline.getElementsByTagName("wp:extent")[0];
+      if (!extent) {
+        extent = dom.createElementNS(WP_NS, "wp:extent");
+        extent.setAttribute("cx", "5000000"); // fallback ≈ 3.5in
+        extent.setAttribute("cy", "3000000"); // fallback ≈ 2.1in
+        // put extent near top if possible
+        inline.insertBefore(extent, inline.firstChild);
+      } else {
+        if (!extent.getAttribute("cx")) extent.setAttribute("cx", "5000000");
+        if (!extent.getAttribute("cy")) extent.setAttribute("cy", "3000000");
       }
 
-      // replace anchor with inline (if anchor has a parent)
+      // Ensure a wp:docPr exists (id and name help Quick Look)
+      let docPr = inline.getElementsByTagName("wp:docPr")[0];
+      if (!docPr) {
+        docPr = dom.createElementNS(WP_NS, "wp:docPr");
+        // try to give a unique-ish id so multiple images don't collide
+        docPr.setAttribute("id", String(nextDocPrId++));
+        docPr.setAttribute("name", `Picture ${docPr.getAttribute("id") || nextDocPrId}`);
+        inline.appendChild(docPr);
+      } else {
+        if (!docPr.getAttribute("id")) docPr.setAttribute("id", String(nextDocPrId++));
+        if (!docPr.getAttribute("name")) docPr.setAttribute("name", "Picture " + docPr.getAttribute("id"));
+      }
+
+      // Remove wrap/anchor-specific nodes that only make sense for anchored images
+      const toRemove = [];
+      // typical anchor-only children Quick Look ignores or misrenders:
+      ["wp:wrap", "wp:positionH", "wp:positionV", "wp:anchor", "wp:effectExtent"].forEach(tag => {
+        const nodes = inline.getElementsByTagName(tag);
+        for (let i = nodes.length - 1; i >= 0; i--) toRemove.push(nodes[i]);
+      });
+      for (const n of toRemove) {
+        if (n.parentNode) n.parentNode.removeChild(n);
+      }
+
+      // replace anchor with our inline node
       if (anchor.parentNode) {
         anchor.parentNode.replaceChild(inline, anchor);
       }
@@ -1145,6 +1171,52 @@ const downscaleImagesInZip = async (zip, opts = {}) => {
 // Downscale images (especially for mobile) before packaging
 const imgMaxDim = isLikelyMobile() ? 1400 : 2048;
 await downscaleImagesInZip(zip, { maxDimension: imgMaxDim, minSizeBytes: 120 * 1024 });
+
+// --- Quick Look fallback normalization ---
+// (Applies only to inline shapes and table borders; non-destructive for Word)
+try {
+  const allTbls = docDom.getElementsByTagName("w:tbl");
+  for (let i = 0; i < allTbls.length; i++) {
+    const tbl = allTbls[i];
+    let tblPr = Array.from(tbl.childNodes).find(n => n.nodeName === "w:tblPr");
+    if (!tblPr) {
+      tblPr = createEl(docDom, "tblPr");
+      tbl.insertBefore(tblPr, tbl.firstChild);
+    }
+    // force explicit borders (Quick Look ignores inherited styles)
+    let borders = Array.from(tblPr.childNodes).find(n => n.nodeName === "w:tblBorders");
+    if (!borders) {
+      borders = createEl(docDom, "tblBorders");
+      tblPr.appendChild(borders);
+    }
+    const sides = ["top","left","bottom","right","insideH","insideV"];
+// replace `borders.innerHTML = "";` with:
+while (borders.firstChild) borders.removeChild(borders.firstChild);
+
+    for (const s of sides) {
+      const b = createEl(docDom, s);
+      b.setAttribute("w:val", "single");
+      b.setAttribute("w:sz", "8");   // thicker 4pt border so Quick Look renders it
+      b.setAttribute("w:color", "000000");
+      borders.appendChild(b);
+    }
+  }
+
+  // convert anchors to inline using the same robust routine (ensures namespace, extents, docPr)
+convertAnchorsToInline(docDom);
+
+
+  // ensure all <wp:extent> have numeric cx/cy; otherwise Quick Look stretches
+  const extents = docDom.getElementsByTagName("wp:extent");
+  for (const ex of extents) {
+    if (!ex.getAttribute("cx") || !ex.getAttribute("cy")) {
+      ex.setAttribute("cx", "5000000"); // ~3.5in
+      ex.setAttribute("cy", "3000000"); // ~2.1in
+    }
+  }
+} catch (e) {
+  console.warn("Quick Look fallback normalization failed:", e);
+}
 
   // --- ZIP generate + validation (DEFLATE first, fallback to STORE) ---
 try {
