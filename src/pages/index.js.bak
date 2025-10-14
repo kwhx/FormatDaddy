@@ -156,6 +156,13 @@ const restoreImageExtentsToDom = (dom, rIdToBasenameMap, rIdExtentsMap) => {
   }
 };
 
+// after parsing document.xml into docDom and header/footer DOMs, do:
+const docRelText = await readText("word/_rels/document.xml.rels");
+const relMap = docRelText ? parseRelsMap(docRelText) : {};
+const docRIdExtents = collectImageExtentsFromDom(docDom);
+// For header/footer: capture their extents too — loop over headerFiles/footerFiles and parse each DOM similarly
+const headerRIdExtents = {}; // you should build by calling collectImageExtentsFromDom on parsed header/footer DOMs and merging
+
   // Insert these helpers near the top of your file (after twips or where convenient)
 
 // small helper to yield so mobile browsers can breathe
@@ -440,16 +447,14 @@ if (docDom.getElementsByTagName("parsererror").length > 0) {
   setStatus("idle");
   return;
 }
-  const fileNames = Object.keys(zip.files);
-  const headerFiles = fileNames.filter((p) => /^word\/header.*\.xml$/i.test(p));
-  const footerFiles = fileNames.filter((p) => /^word\/footer.*\.xml$/i.test(p));
-
 // capture image extents for document main body
 const docRelTxt = await readText("word/_rels/document.xml.rels");
 const docRelMap = docRelTxt ? parseRelsMap(docRelTxt) : {};
 const docRIdExtents = collectImageExtentsFromDom(docDom);
 
 // capture header/footer extents (if headers exist, parse them first and capture extents)
+const headerFiles = Object.keys(zip.files).filter((p) => /^word\/header.*\.xml$/i.test(p));
+const footerFiles = Object.keys(zip.files).filter((p) => /^word\/footer.*\.xml$/i.test(p));
 const headerRIdExtents = {};
 for (const hf of headerFiles) {
   const hxml = await readText(hf);
@@ -486,12 +491,6 @@ try {
   restoreTableTblPrsIfMissing(docDom, originalTblPrs);
 } catch (e) {
   console.warn("Failed to restore table tblPrs:", e);
-}
-
-try {
-  restoreImageExtentsToDom(docDom, docRelMap, docRIdExtents);
-} catch (e) {
-  console.warn("Failed to restore image extents into document DOM:", e);
 }
 
   // Serialize and write back document.xml
@@ -545,8 +544,7 @@ const tryParseAndSanitize = (rawText, path = '') => {
   return { ok: false, error: pe, text: rawText };
 };
 // Capture table properties (tblPr) from a DOM and return an array of serialized tblPr strings (one per table in order)
-// Capture table properties (tblPr) from a DOM and return an array of serialized tblPr strings (one per table in order)
-function captureTableTblPrs(dom) {
+const captureTableTblPrs = (dom) => {
   const tbls = dom.getElementsByTagName("w:tbl");
   const arr = [];
   for (let i = 0; i < tbls.length; i++) {
@@ -561,34 +559,35 @@ function captureTableTblPrs(dom) {
     arr.push(tblPr ? new XMLSerializer().serializeToString(tblPr) : null);
   }
   return arr;
-}
+};
 
 // Restore tblPr strings into a DOM where the table at index i has null/absent tblPr but originalTblPrs[i] is present.
 // This function only adds tblPr if the current table lacks it (conservative).
-function restoreTableTblPrsIfMissing(dom, originalTblPrs) {
+const restoreTableTblPrsIfMissing = (dom, originalTblPrs) => {
   const tbls = dom.getElementsByTagName("w:tbl");
   for (let i = 0; i < tbls.length && i < originalTblPrs.length; i++) {
     const tbl = tbls[i];
     const hasTblPr = Array.from(tbl.childNodes).some(n => n.nodeName === "w:tblPr");
     if (!hasTblPr && originalTblPrs[i]) {
-      try {
-        // Parse the original tblPr string into a temporary XML document
-        const parser = new DOMParser();
-        const parsedDoc = parser.parseFromString(originalTblPrs[i], "application/xml");
-        const origTblPr = parsedDoc.documentElement;
-        // Import the original tblPr node (and its children) into the target DOM so namespaces & structure are preserved
-        const imported = dom.importNode(origTblPr, true);
-        // Insert imported node at top of table
-        tbl.insertBefore(imported, tbl.firstChild);
-        console.log("Restored tblPr for table index", i);
-      } catch (err) {
-        console.warn("Failed to import/restore tblPr for table index", i, err);
+      // parse the original tblPr string and insert
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(originalTblPrs[i], "application/xml");
+      const origTblPr = doc.documentElement;
+      // import nodes into target DOM: create a cloned element with the same tag/children
+      const cloned = dom.createElementNS(origTblPr.namespaceURI, origTblPr.nodeName);
+      // copy attributes and child nodes
+      for (let a = 0; a < origTblPr.attributes.length; a++) {
+        const at = origTblPr.attributes[a];
+        cloned.setAttribute(at.name, at.value);
       }
+      // copy children as text (cheap but effective)
+      cloned.innerHTML = new XMLSerializer().serializeToString(origTblPr).replace(/^<[^>]+>|<\/[^>]+>$/g, '');
+      // Insert cloned at top of table
+      tbl.insertBefore(cloned, tbl.firstChild);
+      console.log("Restored tblPr for table index", i);
     }
   }
-}
-
-
+};
 
 // sanitize XML strings before writing to zip
 // stronger sanitizer: remove BOM, remove HTML <parsererror> wrapper even if preceded by xml decl,
@@ -854,10 +853,14 @@ const validateXmlPartsInZipWithDebug = async (zip) => {
   console.log('All XML parts parsed OK in-memory');
 };
 
+restoreImageExtentsToDom(docDom, docRelMap, docRIdExtents);
 // For headers/footers you must parse the xml again into a DOM, call restoreImageExtentsToDom, and serialize/write back the header/footer file.
 // (Integrate this inside the header/footer loops you already have.)
 
 // 3) Update headers & footers if present (async)
+  const fileNames = Object.keys(zip.files);
+  const headerFiles = fileNames.filter((p) => /^word\/header.*\.xml$/i.test(p));
+  const footerFiles = fileNames.filter((p) => /^word\/footer.*\.xml$/i.test(p));
 
 // safer header/footer parse + sanitize + write flow
 for (const hf of headerFiles) {
@@ -872,25 +875,16 @@ for (const hf of headerFiles) {
   }
 
   // parsed.doc is a safe DOM we can modify
-// parsed.doc is a safe DOM we can modify
-const dom = parsed.doc;
-try {
-  await applyFormattingToHeaderFooterDom(dom, font, fontSize, alignment, spacing);
-
-  // restore extents for images referenced in this header (non-fatal)
+  const dom = parsed.doc;
   try {
-    restoreImageExtentsToDom(dom, docRelMap, headerRIdExtents);
-  } catch (re) {
-    console.warn(`Failed to restore header image extents for ${hf}:`, re);
+    await applyFormattingToHeaderFooterDom(dom, font, fontSize, alignment, spacing);
+  } catch (e) {
+    console.warn(`applyFormattingToHeaderFooterDom failed for ${hf}:`, e);
+    // If formatting fails, keep original instead of writing broken output
+    continue;
   }
-
-} catch (e) {
-  console.warn(`applyFormattingToHeaderFooterDom failed for ${hf}:`, e);
-  // If formatting fails, keep original instead of writing broken output
-  continue;
-}
-const out = new XMLSerializer().serializeToString(dom);
-zip.file(hf, ensureXmlDecl(sanitizeXmlBeforeWrite(out)));
+  const out = new XMLSerializer().serializeToString(dom);
+  zip.file(hf, ensureXmlDecl(sanitizeXmlBeforeWrite(out)));
 }
 
 for (const ff of footerFiles) {
@@ -903,23 +897,15 @@ for (const ff of footerFiles) {
     continue;
   }
 
-const dom = parsed.doc;
-try {
-  await applyFormattingToHeaderFooterDom(dom, font, fontSize, alignment, spacing);
-
-  // restore extents for images referenced in this footer (non-fatal)
+  const dom = parsed.doc;
   try {
-    restoreImageExtentsToDom(dom, docRelMap, footerRIdExtents);
-  } catch (re) {
-    console.warn(`Failed to restore footer image extents for ${ff}:`, re);
+    await applyFormattingToHeaderFooterDom(dom, font, fontSize, alignment, spacing);
+  } catch (e) {
+    console.warn(`applyFormattingToHeaderFooterDom failed for ${ff}:`, e);
+    continue;
   }
-
-} catch (e) {
-  console.warn(`applyFormattingToHeaderFooterDom failed for ${ff}:`, e);
-  continue;
-}
-const out = new XMLSerializer().serializeToString(dom);
-zip.file(ff, ensureXmlDecl(sanitizeXmlBeforeWrite(out)));
+  const out = new XMLSerializer().serializeToString(dom);
+  zip.file(ff, ensureXmlDecl(sanitizeXmlBeforeWrite(out)));
 }
 
 
