@@ -353,36 +353,196 @@ const docDom = parser.parseFromString(documentXml, "application/xml");
 };
 writeText("word/document.xml", ensureXmlDecl(updatedDocumentXml));
 
-  // 3) Update headers & footers if present (async)
+// sanitize XML strings before writing to zip
+const sanitizeXmlBeforeWrite = (xmlString) => {
+  if (!xmlString) return '<?xml version="1.0" encoding="UTF-8"?>\n';
+  // If the string contains an HTML parsererror wrapper (from DOMParser errors),
+  // strip that whole wrapper.
+  xmlString = xmlString.replace(/<html[\s\S]*?<parsererror[\s\S]*?<\/parsererror>[\s\S]*?<\/html>/i, "");
+  // Remove any BOM
+  xmlString = xmlString.replace(/^\uFEFF/, "");
+  // collapse multiple XML declarations down to one at start
+  xmlString = xmlString.replace(/^\s*(?:<\?xml[\s\S]*?\?>\s*)*/, '<?xml version="1.0" encoding="UTF-8"?>\n');
+  return xmlString;
+};
+
+// Move media files found at root (media/...) into word/media/ to match rels.
+const moveRootMediaIntoWord = async (zip) => {
+  try {
+    const names = Object.keys(zip.files);
+    const rootMedia = names.filter((p) => /^media\/.+$/i.test(p));
+    if (rootMedia.length === 0) return;
+
+    // ensure the word/media/ directory will exist (JSZip doesn't really need dirs)
+    for (const p of rootMedia) {
+      const newPath = 'word/' + p; // e.g. media/image.png -> word/media/image.png
+      // read binary content and re-add under word/
+      const data = await zip.file(p).async('arraybuffer');
+      zip.file(newPath, data, { binary: true });
+      // remove old root entry
+      zip.remove(p);
+      console.log(`Moved ${p} -> ${newPath}`);
+    }
+  } catch (e) {
+    console.warn("moveRootMediaIntoWord failed:", e);
+  }
+};
+
+// Fix relationship Targets that reference media with leading slashes or wrong relative paths.
+// This reads any rel file under word/_rels and rewrites Target values to the expected relative path.
+// Fix relationship Targets that reference media with leading slashes or wrong relative paths.
+// This reads any rel file under word/_rels and rewrites Target values to the expected relative path.
+const sanitizeRelTargets = async (zip) => {
+  try {
+    const relFiles = Object.keys(zip.files).filter(p => /^word\/_rels\/.*\.rels$/i.test(p));
+    const parser = new DOMParser();
+    const serializer = new XMLSerializer();
+    const CT_NS = "http://schemas.openxmlformats.org/package/2006/relationships";
+
+    for (const rf of relFiles) {
+      const txt = await zip.file(rf).async('text');
+      // parse as XML
+      const dom = parser.parseFromString(txt, "application/xml");
+      const pe = dom.getElementsByTagName('parsererror');
+      if (pe && pe.length > 0) {
+        console.warn(`Skipping ${rf}: DOMParser produced parsererror (file may be malformed)`);
+        continue; // do not re-write a broken rel file
+      }
+
+      const rels = dom.getElementsByTagName('Relationship');
+      let changed = false;
+      for (let i = 0; i < rels.length; i++) {
+        const rel = rels[i];
+        let t = rel.getAttribute('Target') || '';
+        if (!t) continue;
+        // strip leading slash
+        t = t.replace(/^\/+/, '');
+        // if target refers to media/* but not under word/, normalize to media/...
+        // (document rels live in word/_rels so "media/..." is correct relative to word/)
+        if (/^media\//i.test(t) && !/^word\/media\//i.test(t)) {
+          // keep the tail after the first segment, to avoid doubling
+          const tail = t.split('/').slice(1).join('/');
+          if (tail) t = `media/${tail}`;
+        }
+        if (rel.getAttribute('Target') !== t) {
+          const old = rel.getAttribute('Target');
+          rel.setAttribute('Target', t);
+          changed = true;
+          console.log(`Sanitized rel Target in ${rf}: ${old} -> ${t}`);
+        }
+      }
+
+      if (changed) {
+        const out = serializer.serializeToString(dom);
+        zip.file(rf, sanitizeXmlBeforeWrite(out));
+      }
+    }
+  } catch (e) {
+    console.warn("sanitizeRelTargets failed:", e);
+  }
+};
+
+const ensureContentTypesForMedia = async (zip) => {
+  try {
+    const ctPath = "[Content_Types].xml";
+    let ctText = await readText(ctPath);
+    if (!ctText) {
+      ctText = '<?xml version="1.0" encoding="UTF-8"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"></Types>';
+    }
+    const parser = new DOMParser();
+    const ctDom = parser.parseFromString(ctText, "application/xml");
+    const pe = ctDom.getElementsByTagName('parsererror');
+    if (pe && pe.length > 0) {
+      console.warn("[Content_Types].xml parse error — skipping content types patch");
+      return;
+    }
+
+    const CT_NS = "http://schemas.openxmlformats.org/package/2006/content-types";
+    const typesEl = ctDom.documentElement;
+
+    const hasDefault = (ext) => {
+      const defaults = typesEl.getElementsByTagNameNS(CT_NS, "Default");
+      for (let i = 0; i < defaults.length; i++) {
+        if (defaults[i].getAttribute("Extension") === ext) return true;
+      }
+      return false;
+    };
+    const hasOverride = (partName) => {
+      const overrides = typesEl.getElementsByTagNameNS(CT_NS, "Override");
+      for (let i = 0; i < overrides.length; i++) {
+        if (overrides[i].getAttribute("PartName") === partName) return true;
+      }
+      return false;
+    };
+    const ensureDefault = (ext, ct) => {
+      if (!hasDefault(ext)) {
+        const def = ctDom.createElementNS(CT_NS, "Default");
+        def.setAttribute("Extension", ext);
+        def.setAttribute("ContentType", ct);
+        typesEl.appendChild(def);
+      }
+    };
+    ensureDefault("png", "image/png");
+    ensureDefault("jpeg", "image/jpeg");
+    ensureDefault("jpg", "image/jpeg");
+    ensureDefault("gif", "image/gif");
+
+    const names = Object.keys(zip.files);
+    const mediaFiles = names.filter((p) => /^word\/media\/.+\.(png|jpe?g|gif|bmp)$/i.test(p));
+    for (const mf of mediaFiles) {
+      const partName = `/${mf}`;
+      if (!hasOverride(partName)) {
+        const ext = mf.split('.').pop().toLowerCase();
+        let contentType = "application/octet-stream";
+        if (ext === "png") contentType = "image/png";
+        else if (ext === "jpg" || ext === "jpeg") contentType = "image/jpeg";
+        else if (ext === "gif") contentType = "image/gif";
+        else if (ext === "bmp") contentType = "image/bmp";
+
+        const ov = ctDom.createElementNS(CT_NS, "Override");
+        ov.setAttribute("PartName", partName);
+        ov.setAttribute("ContentType", contentType);
+        typesEl.appendChild(ov);
+        console.log(`Added Override for ${partName} -> ${contentType}`);
+      }
+    }
+
+    const patched = new XMLSerializer().serializeToString(ctDom);
+    zip.file(ctPath, ensureXmlDecl(sanitizeXmlBeforeWrite(patched)));
+    console.log("[Content_Types].xml patched for media entries");
+  } catch (e) {
+    console.warn("Failed to ensure content types:", e);
+  }
+};
+
+
+const validateXmlPartsInZip = async (zip) => {
+  const parser = new DOMParser();
+  const xmlFiles = Object.keys(zip.files).filter(p => p.toLowerCase().endsWith('.xml'));
+  for (const p of xmlFiles) {
+    try {
+      const txt = await zip.file(p).async('text');
+      const start = txt.indexOf('<?xml');
+      const clean = start > 0 ? txt.slice(start) : txt;
+      const parsed = parser.parseFromString(clean, "application/xml");
+      const pe = parsed.getElementsByTagName('parsererror');
+      if (pe && pe.length > 0) {
+        const snippet = clean.slice(0, 512).replace(/\n/g, "\\n");
+        console.error('XML parse error in', p, (pe[0].textContent || pe[0].innerText), 'snippet:', snippet);
+        throw new Error('xml-parse-error:' + p);
+      }
+    } catch (e) {
+      throw e;
+    }
+  }
+  console.log('All XML parts parsed OK in-memory');
+};
+
+
+// 3) Update headers & footers if present (async)
   const fileNames = Object.keys(zip.files);
   const headerFiles = fileNames.filter((p) => /^word\/header.*\.xml$/i.test(p));
   const footerFiles = fileNames.filter((p) => /^word\/footer.*\.xml$/i.test(p));
-
-  // sanitize relationship Targets (remove leading slashes)
-/* eslint-disable no-unused-vars */
-const relFiles = Object.keys(zip.files).filter((p) => /^word\/_rels\/.*\.rels$/i.test(p));
-for (const relPath of relFiles) {
-  try {
-    const relXml = await readText(relPath);
-    if (!relXml) continue;
-    const relDom = parser.parseFromString(relXml, "application/xml");
-    const relEls = relDom.getElementsByTagName("Relationship");
-    for (let i = 0; i < relEls.length; i++) {
-      const r = relEls[i];
-      const t = r.getAttribute("Target");
-      if (t && /^\/+/.test(t)) {
-        const newT = t.replace(/^\/+/, ""); // strip leading slashes
-        r.setAttribute("Target", newT);
-        console.log(`Sanitized rel Target in ${relPath}: ${t} -> ${newT}`);
-      }
-    }
-    const relOut = new XMLSerializer().serializeToString(relDom);
-    // ensure xml decl if missing
-    zip.file(relPath, ensureXmlDecl(relOut));
-  } catch (e) {
-    console.warn("Failed sanitizing rel:", relPath, e);
-  }
-}
 
   for (const hf of headerFiles) {
     const xml = await readText(hf);
@@ -400,6 +560,21 @@ for (const relPath of relFiles) {
     const out = serializer.serializeToString(dom);
     writeText(ff, ensureXmlDecl(out));
   }
+
+  // ensure media lands in word/media/ and rels/content-types are consistent:
+await moveRootMediaIntoWord(zip);
+await sanitizeRelTargets(zip);
+await ensureContentTypesForMedia(zip);
+
+// validate XML parts in-memory (throws if any parse errors)
+try {
+  await validateXmlPartsInZip(zip);
+} catch (validationErr) {
+  console.error("Validation failed for generated archive:", validationErr);
+  alert("Formatting failed: generated DOCX could not be validated. See console for details.");
+  setStatus("idle");
+  return; // abort — do not generate / hand out corrupted docx
+}
 
   // 4) Generate new docx blob from zip and produce preview from that same blob
   // helper: downscale large images inside the zip (client-side)
