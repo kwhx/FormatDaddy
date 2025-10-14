@@ -18,6 +18,7 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
 // ref for the download button so we can briefly flash it when formatting completes
 const downloadBtnRef = useRef(null);
 
+
 // ensure sidebar is open on larger screens and reopen when resizing up
 useEffect(() => {
   // on mount, sync to initial width
@@ -55,6 +56,37 @@ useEffect(() => {
   const MAX_BYTES = 25 * 1024 * 1024;
   const twips = (inches) => Math.round(inches * 1440);
 
+  // Insert these helpers near the top of your file (after twips or where convenient)
+
+// small helper to yield so mobile browsers can breathe
+const maybeYield = async (i, batch = 500) => {
+  if (i % batch === 0) {
+    // yield to event loop
+    await new Promise((r) => setTimeout(r, 0));
+  }
+};
+
+const promiseWithTimeout = (p, ms, onTimeout) => {
+  let timer;
+  const timeoutPromise = new Promise((_, rej) => {
+    timer = setTimeout(() => {
+      if (onTimeout) onTimeout();
+      rej(new Error("timeout"));
+    }, ms);
+  });
+  return Promise.race([p.then((v) => { clearTimeout(timer); return v; }), timeoutPromise]);
+};
+
+// rough mobile detection (works on iPhone/Android)
+const isLikelyMobile = () => {
+  try {
+    if (typeof navigator === "undefined") return false;
+    return /Mobi|Android|iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 1);
+  } catch (e) {
+    return false;
+  }
+};
+
   const onFileChange = (f) => {
     if (!f) return;
     if (!f.name.toLowerCase().endsWith(".docx")) {
@@ -77,254 +109,300 @@ useEffect(() => {
   const setAttr = (el, name, value) => el.setAttributeNS(ns, "w:" + name, value);
 
   // Apply run-level formatting: add rPr -> rFonts + sz + szCs
-  const applyRunFormatting = (docDom, fontName, fontSizePt) => {
-    const rNodes = docDom.getElementsByTagName("w:r");
-    const sizeVal = String(Math.round(fontSizePt * 2)); // half-points (w:sz uses half-points)
-    for (let i = 0; i < rNodes.length; i++) {
-      const r = rNodes[i];
+  // Replace your existing applyRunFormatting with this async version
+const applyRunFormatting = async (docDom, fontName, fontSizePt) => {
+  const rNodes = docDom.getElementsByTagName("w:r");
+  const sizeVal = String(Math.round(fontSizePt * 2)); // half-points
+  for (let i = 0; i < rNodes.length; i++) {
+    const r = rNodes[i];
 
-      let rPr = null;
-      for (let j = 0; j < r.childNodes.length; j++) {
-        if (r.childNodes[j].nodeName === "w:rPr") {
-          rPr = r.childNodes[j];
-          break;
-        }
-      }
-      if (!rPr) {
-        rPr = createEl(docDom, "rPr");
-        r.insertBefore(rPr, r.firstChild);
-      }
-
-      let rFonts = null;
-      for (let k = 0; k < rPr.childNodes.length; k++) {
-        if (rPr.childNodes[k].nodeName === "w:rFonts") {
-          rFonts = rPr.childNodes[k];
-          break;
-        }
-      }
-      if (!rFonts) {
-        rFonts = createEl(docDom, "rFonts");
-        rPr.appendChild(rFonts);
-      }
-      rFonts.setAttribute("w:ascii", fontName);
-      rFonts.setAttribute("w:hAnsi", fontName);
-      rFonts.setAttribute("w:cs", fontName);
-
-      let sz = null;
-      for (let k = 0; k < rPr.childNodes.length; k++) {
-        if (rPr.childNodes[k].nodeName === "w:sz") {
-          sz = rPr.childNodes[k];
-          break;
-        }
-      }
-      if (!sz) {
-        sz = createEl(docDom, "sz");
-        rPr.appendChild(sz);
-      }
-      sz.setAttribute("w:val", sizeVal);
-
-      let szCs = null;
-      for (let k = 0; k < rPr.childNodes.length; k++) {
-        if (rPr.childNodes[k].nodeName === "w:szCs") {
-          szCs = rPr.childNodes[k];
-          break;
-        }
-      }
-      if (!szCs) {
-        szCs = createEl(docDom, "szCs");
-        rPr.appendChild(szCs);
-      }
-      szCs.setAttribute("w:val", sizeVal);
-    }
-  };
-
-  // Apply paragraph formatting: alignment + spacing
-  const applyParagraphFormatting = (docDom, alignmentVal, spacingLines) => {
-    const pNodes = docDom.getElementsByTagName("w:p");
-    const mapping = { left: "left", right: "right", center: "center", justify: "both" };
-    const alignWordVal = mapping[alignmentVal] || "both";
-    const lineVal = String(Math.round(spacingLines * 240));
-
-    for (let i = 0; i < pNodes.length; i++) {
-      const p = pNodes[i];
-      let pPr = null;
-      for (let j = 0; j < p.childNodes.length; j++) {
-        if (p.childNodes[j].nodeName === "w:pPr") {
-          pPr = p.childNodes[j];
-          break;
-        }
-      }
-      if (!pPr) {
-        pPr = createEl(docDom, "pPr");
-        p.insertBefore(pPr, p.firstChild);
-      }
-
-      let jc = null;
-      for (let k = 0; k < pPr.childNodes.length; k++) {
-        if (pPr.childNodes[k].nodeName === "w:jc") {
-          jc = pPr.childNodes[k];
-          break;
-        }
-      }
-      if (!jc) {
-        jc = createEl(docDom, "jc");
-        pPr.appendChild(jc);
-      }
-      jc.setAttribute("w:val", alignWordVal);
-
-      let spacingEl = null;
-      for (let k = 0; k < pPr.childNodes.length; k++) {
-        if (pPr.childNodes[k].nodeName === "w:spacing") {
-          spacingEl = pPr.childNodes[k];
-          break;
-        }
-      }
-      if (!spacingEl) {
-        spacingEl = createEl(docDom, "spacing");
-        pPr.appendChild(spacingEl);
-      }
-      spacingEl.setAttribute("w:line", lineVal);
-      spacingEl.setAttribute("w:lineRule", "auto");
-    }
-  };
-
-  // Apply section (page) margins in sectPr -> pgMar
-  const applySectionMargins = (docDom, margins) => {
-    const sectPrs = docDom.getElementsByTagName("w:sectPr");
-    if (!sectPrs || sectPrs.length === 0) {
-      const body = docDom.getElementsByTagName("w:body")[0];
-      const newSect = createEl(docDom, "sectPr");
-      body.appendChild(newSect);
-      const pgMar = createEl(docDom, "pgMar");
-      newSect.appendChild(pgMar);
-      pgMar.setAttribute("w:top", String(twips(margins.top)));
-      pgMar.setAttribute("w:right", String(twips(margins.right)));
-      pgMar.setAttribute("w:bottom", String(twips(margins.bottom)));
-      pgMar.setAttribute("w:left", String(twips(margins.left)));
-      return;
-    }
-    const lastSect = sectPrs[sectPrs.length - 1];
-    let pgMar = null;
-    for (let i = 0; i < lastSect.childNodes.length; i++) {
-      if (lastSect.childNodes[i].nodeName === "w:pgMar") {
-        pgMar = lastSect.childNodes[i];
+    let rPr = null;
+    for (let j = 0; j < r.childNodes.length; j++) {
+      if (r.childNodes[j].nodeName === "w:rPr") {
+        rPr = r.childNodes[j];
         break;
       }
     }
-    if (!pgMar) {
-      pgMar = createEl(docDom, "pgMar");
-      lastSect.appendChild(pgMar);
+    if (!rPr) {
+      rPr = createEl(docDom, "rPr");
+      r.insertBefore(rPr, r.firstChild);
     }
+
+    let rFonts = null;
+    for (let k = 0; k < rPr.childNodes.length; k++) {
+      if (rPr.childNodes[k].nodeName === "w:rFonts") {
+        rFonts = rPr.childNodes[k];
+        break;
+      }
+    }
+    if (!rFonts) {
+      rFonts = createEl(docDom, "rFonts");
+      rPr.appendChild(rFonts);
+    }
+    rFonts.setAttribute("w:ascii", fontName);
+    rFonts.setAttribute("w:hAnsi", fontName);
+    rFonts.setAttribute("w:cs", fontName);
+
+    let sz = null;
+    for (let k = 0; k < rPr.childNodes.length; k++) {
+      if (rPr.childNodes[k].nodeName === "w:sz") {
+        sz = rPr.childNodes[k];
+        break;
+      }
+    }
+    if (!sz) {
+      sz = createEl(docDom, "sz");
+      rPr.appendChild(sz);
+    }
+    sz.setAttribute("w:val", sizeVal);
+
+    let szCs = null;
+    for (let k = 0; k < rPr.childNodes.length; k++) {
+      if (rPr.childNodes[k].nodeName === "w:szCs") {
+        szCs = rPr.childNodes[k];
+        break;
+      }
+    }
+    if (!szCs) {
+      szCs = createEl(docDom, "szCs");
+      rPr.appendChild(szCs);
+    }
+    szCs.setAttribute("w:val", sizeVal);
+
+    // yield occasionally on large documents
+    await maybeYield(i, 400);
+  }
+};
+
+
+  // Apply paragraph formatting: alignment + spacing
+  // Replace your applyParagraphFormatting with this async version
+const applyParagraphFormatting = async (docDom, alignmentVal, spacingLines) => {
+  const pNodes = docDom.getElementsByTagName("w:p");
+  const mapping = { left: "left", right: "right", center: "center", justify: "both" };
+  const alignWordVal = mapping[alignmentVal] || "both";
+  const lineVal = String(Math.round(spacingLines * 240));
+
+  for (let i = 0; i < pNodes.length; i++) {
+    const p = pNodes[i];
+    let pPr = null;
+    for (let j = 0; j < p.childNodes.length; j++) {
+      if (p.childNodes[j].nodeName === "w:pPr") {
+        pPr = p.childNodes[j];
+        break;
+      }
+    }
+    if (!pPr) {
+      pPr = createEl(docDom, "pPr");
+      p.insertBefore(pPr, p.firstChild);
+    }
+
+    let jc = null;
+    for (let k = 0; k < pPr.childNodes.length; k++) {
+      if (pPr.childNodes[k].nodeName === "w:jc") {
+        jc = pPr.childNodes[k];
+        break;
+      }
+    }
+    if (!jc) {
+      jc = createEl(docDom, "jc");
+      pPr.appendChild(jc);
+    }
+    jc.setAttribute("w:val", alignWordVal);
+
+    let spacingEl = null;
+    for (let k = 0; k < pPr.childNodes.length; k++) {
+      if (pPr.childNodes[k].nodeName === "w:spacing") {
+        spacingEl = pPr.childNodes[k];
+        break;
+      }
+    }
+    if (!spacingEl) {
+      spacingEl = createEl(docDom, "spacing");
+      pPr.appendChild(spacingEl);
+    }
+    spacingEl.setAttribute("w:line", lineVal);
+    spacingEl.setAttribute("w:lineRule", "auto");
+
+    await maybeYield(i, 200);
+  }
+};
+
+
+  // Apply section (page) margins in sectPr -> pgMar
+// Replace applySectionMargins with async version (fast but still yields once)
+const applySectionMargins = async (docDom, margins) => {
+  const sectPrs = docDom.getElementsByTagName("w:sectPr");
+  if (!sectPrs || sectPrs.length === 0) {
+    const body = docDom.getElementsByTagName("w:body")[0];
+    const newSect = createEl(docDom, "sectPr");
+    body.appendChild(newSect);
+    const pgMar = createEl(docDom, "pgMar");
+    newSect.appendChild(pgMar);
     pgMar.setAttribute("w:top", String(twips(margins.top)));
     pgMar.setAttribute("w:right", String(twips(margins.right)));
     pgMar.setAttribute("w:bottom", String(twips(margins.bottom)));
     pgMar.setAttribute("w:left", String(twips(margins.left)));
-  };
+    return;
+  }
+  const lastSect = sectPrs[sectPrs.length - 1];
+  let pgMar = null;
+  for (let i = 0; i < lastSect.childNodes.length; i++) {
+    if (lastSect.childNodes[i].nodeName === "w:pgMar") {
+      pgMar = lastSect.childNodes[i];
+      break;
+    }
+  }
+  if (!pgMar) {
+    pgMar = createEl(docDom, "pgMar");
+    lastSect.appendChild(pgMar);
+  }
+  pgMar.setAttribute("w:top", String(twips(margins.top)));
+  pgMar.setAttribute("w:right", String(twips(margins.right)));
+  pgMar.setAttribute("w:bottom", String(twips(margins.bottom)));
+  pgMar.setAttribute("w:left", String(twips(margins.left)));
+
+  // tiny yield
+  await new Promise((r) => setTimeout(r, 0));
+};
+
 
   // Apply the same run/para formatting to header/footer XML DOM
-  const applyFormattingToHeaderFooterDom = (dom, fontName, fontSizePt, alignmentVal, spacingLines) => {
-    applyRunFormatting(dom, fontName, fontSizePt);
-    applyParagraphFormatting(dom, alignmentVal, spacingLines);
-  };
+// Apply header/footer formatting (async wrapper)
+const applyFormattingToHeaderFooterDom = async (dom, fontName, fontSizePt, alignmentVal, spacingLines) => {
+  await applyRunFormatting(dom, fontName, fontSizePt);
+  await applyParagraphFormatting(dom, alignmentVal, spacingLines);
+};
+
 
   // Main handler: modify original docx in-place and offer download
-  const handleFormat = async () => {
-    if (!file) {
-      alert("No file selected");
-      return;
-    }
+// Replace your handleFormat's "processing" below where document parsing & modification happens
+const handleFormat = async () => {
+  if (!file) {
+    alert("No file selected");
+    return;
+  }
 
-    setStatus("uploading");
-    await new Promise((r) => setTimeout(r, 200));
-    setStatus("processing");
+  setStatus("uploading");
+  await new Promise((r) => setTimeout(r, 200));
+  setStatus("processing");
 
-    // 1) Load zip
-    let zip;
+  // 1) Load zip
+  let zip;
+  try {
+    const ab = await file.arrayBuffer();
+    zip = await JSZip.loadAsync(ab);
+  } catch (err) {
+    console.error("Failed to load zip:", err);
+    alert("Failed to read the DOCX file.");
+    setStatus("idle");
+    return;
+  }
+
+  const readText = async (path) => {
+    const entry = zip.file(path);
+    if (!entry) return null;
+    return await entry.async("text");
+  };
+  const writeText = (path, text) => {
+    zip.file(path, text);
+  };
+
+  // 2) Parse document.xml and apply formatting (now using async batched functions)
+  const documentXml = await readText("word/document.xml");
+  if (!documentXml) {
+    alert("Invalid DOCX: missing word/document.xml");
+    setStatus("idle");
+    return;
+  }
+  const parser = new DOMParser();
+  const docDom = parser.parseFromString(documentXml, "application/xml");
+
+  // Apply run + paragraph formatting throughout document.xml (async)
+  try {
+    await applyRunFormatting(docDom, font, fontSize);
+    await applyParagraphFormatting(docDom, alignment, spacing);
+    await applySectionMargins(docDom, { top: marginTop, right: marginRight, bottom: marginBottom, left: marginLeft });
+  } catch (err) {
+    console.warn("Formatting step failed:", err);
+  }
+
+  // Serialize and write back document.xml
+  const serializer = new XMLSerializer();
+  const updatedDocumentXml = serializer.serializeToString(docDom);
+  writeText("word/document.xml", updatedDocumentXml);
+
+  // 3) Update headers & footers if present (async)
+  const fileNames = Object.keys(zip.files);
+  const headerFiles = fileNames.filter((p) => /^word\/header.*\.xml$/i.test(p));
+  const footerFiles = fileNames.filter((p) => /^word\/footer.*\.xml$/i.test(p));
+
+  for (const hf of headerFiles) {
+    const xml = await readText(hf);
+    if (!xml) continue;
+    const dom = parser.parseFromString(xml, "application/xml");
+    await applyFormattingToHeaderFooterDom(dom, font, fontSize, alignment, spacing);
+    const out = serializer.serializeToString(dom);
+    writeText(hf, out);
+  }
+  for (const ff of footerFiles) {
+    const xml = await readText(ff);
+    if (!xml) continue;
+    const dom = parser.parseFromString(xml, "application/xml");
+    await applyFormattingToHeaderFooterDom(dom, font, fontSize, alignment, spacing);
+    const out = serializer.serializeToString(dom);
+    writeText(ff, out);
+  }
+
+  // 4) Generate new docx blob from zip and produce preview from that same blob
+  try {
+    // adaptive zip options: for mobile or big files, avoid compression
+    const mobile = isLikelyMobile();
+    const useStore = mobile || (file && file.size > 5 * 1024 * 1024); // >5MB -> use STORE
+    const zipOptions = { type: "blob", streamFiles: true, compression: useStore ? "STORE" : "DEFLATE" };
+
+    // wrap generateAsync with a timeout — if it times out, retry with STORE if not already using it
+    let newBlob;
     try {
-      const ab = await file.arrayBuffer();
-      zip = await JSZip.loadAsync(ab);
-    } catch (err) {
-      console.error("Failed to load zip:", err);
-      alert("Failed to read the DOCX file.");
-      setStatus("idle");
-      return;
-    }
-
-    const readText = async (path) => {
-      const entry = zip.file(path);
-      if (!entry) return null;
-      return await entry.async("text");
-    };
-    const writeText = (path, text) => {
-      zip.file(path, text);
-    };
-
-    // 2) Parse document.xml and apply formatting
-    const documentXml = await readText("word/document.xml");
-    if (!documentXml) {
-      alert("Invalid DOCX: missing word/document.xml");
-      setStatus("idle");
-      return;
-    }
-    const parser = new DOMParser();
-    const docDom = parser.parseFromString(documentXml, "application/xml");
-
-    // Apply run + paragraph formatting throughout document.xml
-    applyRunFormatting(docDom, font, fontSize);
-    applyParagraphFormatting(docDom, alignment, spacing);
-
-    // Apply page margins in sectPr
-    applySectionMargins(docDom, { top: marginTop, right: marginRight, bottom: marginBottom, left: marginLeft });
-
-    // Serialize and write back document.xml
-    const serializer = new XMLSerializer();
-    const updatedDocumentXml = serializer.serializeToString(docDom);
-    writeText("word/document.xml", updatedDocumentXml);
-
-    // 3) Update headers & footers if present
-    const fileNames = Object.keys(zip.files);
-    const headerFiles = fileNames.filter((p) => /^word\/header.*\.xml$/i.test(p));
-    const footerFiles = fileNames.filter((p) => /^word\/footer.*\.xml$/i.test(p));
-
-    for (const hf of headerFiles) {
-      const xml = await readText(hf);
-      if (!xml) continue;
-      const dom = parser.parseFromString(xml, "application/xml");
-      applyFormattingToHeaderFooterDom(dom, font, fontSize, alignment, spacing);
-      const out = serializer.serializeToString(dom);
-      writeText(hf, out);
-    }
-    for (const ff of footerFiles) {
-      const xml = await readText(ff);
-      if (!xml) continue;
-      const dom = parser.parseFromString(xml, "application/xml");
-      applyFormattingToHeaderFooterDom(dom, font, fontSize, alignment, spacing);
-      const out = serializer.serializeToString(dom);
-      writeText(ff, out);
-    }
-
-    // 4) Generate new docx blob from zip and produce preview from that same blob
-    try {
-      const newBlob = await zip.generateAsync({ type: "blob" });
-
+      newBlob = await promiseWithTimeout(zip.generateAsync(zipOptions), 20000); // 20s timeout
+    } catch (zipErr) {
+      console.warn("zip.generateAsync timeout or error, retrying with STORE:", zipErr);
+      // retry with store (no compression)
       try {
-        const modifiedArrayBuffer = await newBlob.arrayBuffer();
-        const mammothResult = await mammoth.convertToHtml({ arrayBuffer: modifiedArrayBuffer }, {
+        newBlob = await promiseWithTimeout(zip.generateAsync({ type: "blob", streamFiles: true, compression: "STORE" }), 20000);
+      } catch (retryErr) {
+        console.error("Zip retry failed:", retryErr);
+        throw retryErr;
+      }
+    }
+
+    // Attempt preview, but don't block forever — use timeout
+    try {
+      const modifiedArrayBuffer = await newBlob.arrayBuffer();
+      // mammoth sometimes takes long on mobile; add timeout
+      try {
+        const mammothPromise = mammoth.convertToHtml({ arrayBuffer: modifiedArrayBuffer }, {
           convertImage: mammoth.images.inline((image) => image.read("base64").then(b64 => ({ src: `data:${image.contentType};base64,${b64}` })))
         });
+        const mammothResult = await promiseWithTimeout(mammothPromise, 12000); // 12s timeout
         setHtmlContent(mammothResult.value);
       } catch (previewErr) {
-        console.warn("Preview of modified doc failed:", previewErr);
+        // preview failed or timed out — skip it (we still provide the file)
+        console.warn("Preview of modified doc failed or timed out:", previewErr);
       }
-
-      setDocBlob(newBlob);
-      setStatus("done");
-    } catch (err) {
-      console.error("Failed to generate modified docx:", err);
-      alert("Failed to generate formatted DOCX: " + (err && err.message ? err.message : String(err)));
-      setStatus("idle");
+    } catch (previewErr) {
+      console.warn("Could not preview modified doc (arrayBuffer conversion failed):", previewErr);
     }
-  }; // handleFormat
+
+    setDocBlob(newBlob);
+    setStatus("done");
+  } catch (err) {
+    console.error("Failed to generate modified docx:", err);
+    alert("Failed to generate formatted DOCX: " + (err && err.message ? err.message : String(err)));
+    setStatus("idle");
+  }
+}; // handleFormat
+
 
   return (
     <div className={styles.pageContainer}>
