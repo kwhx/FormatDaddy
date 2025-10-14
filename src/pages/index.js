@@ -309,14 +309,29 @@ const handleFormat = async () => {
   };
 
   // 2) Parse document.xml and apply formatting (now using async batched functions)
-  const documentXml = await readText("word/document.xml");
-  if (!documentXml) {
-    alert("Invalid DOCX: missing word/document.xml");
-    setStatus("idle");
-    return;
+let documentXml = await readText("word/document.xml");
+if (!documentXml) {
+  alert("Invalid DOCX: missing word/document.xml");
+  setStatus("idle");
+  return;
+}
+
+// Trim any leading bytes before the XML declaration (fixes "XML declaration allowed only at the start" errors)
+try {
+  const xmlStart = documentXml.indexOf("<?xml");
+  if (xmlStart > 0) {
+    console.warn("Trimming leading bytes before <?xml in word/document.xml (index " + xmlStart + ")");
+    documentXml = documentXml.slice(xmlStart);
   }
-  const parser = new DOMParser();
-  const docDom = parser.parseFromString(documentXml, "application/xml");
+  // also trim leading whitespace (just in case)
+  documentXml = documentXml.replace(/^\s+/, "");
+} catch (e) {
+  console.warn("Could not sanitize documentXml before parse:", e);
+}
+
+const parser = new DOMParser();
+const docDom = parser.parseFromString(documentXml, "application/xml");
+
 
   // Apply run + paragraph formatting throughout document.xml (async)
   try {
@@ -342,6 +357,32 @@ writeText("word/document.xml", ensureXmlDecl(updatedDocumentXml));
   const fileNames = Object.keys(zip.files);
   const headerFiles = fileNames.filter((p) => /^word\/header.*\.xml$/i.test(p));
   const footerFiles = fileNames.filter((p) => /^word\/footer.*\.xml$/i.test(p));
+
+  // sanitize relationship Targets (remove leading slashes)
+/* eslint-disable no-unused-vars */
+const relFiles = Object.keys(zip.files).filter((p) => /^word\/_rels\/.*\.rels$/i.test(p));
+for (const relPath of relFiles) {
+  try {
+    const relXml = await readText(relPath);
+    if (!relXml) continue;
+    const relDom = parser.parseFromString(relXml, "application/xml");
+    const relEls = relDom.getElementsByTagName("Relationship");
+    for (let i = 0; i < relEls.length; i++) {
+      const r = relEls[i];
+      const t = r.getAttribute("Target");
+      if (t && /^\/+/.test(t)) {
+        const newT = t.replace(/^\/+/, ""); // strip leading slashes
+        r.setAttribute("Target", newT);
+        console.log(`Sanitized rel Target in ${relPath}: ${t} -> ${newT}`);
+      }
+    }
+    const relOut = new XMLSerializer().serializeToString(relDom);
+    // ensure xml decl if missing
+    zip.file(relPath, ensureXmlDecl(relOut));
+  } catch (e) {
+    console.warn("Failed sanitizing rel:", relPath, e);
+  }
+}
 
   for (const hf of headerFiles) {
     const xml = await readText(hf);
