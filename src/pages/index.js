@@ -446,55 +446,81 @@ const moveRootMediaIntoWord = async (zip) => {
 // This reads any rel file under word/_rels and rewrites Target values to the expected relative path.
 // Fix relationship Targets that reference media with leading slashes or wrong relative paths.
 // This reads any rel file under word/_rels and rewrites Target values to the expected relative path.
+// Robust sanitizeRelTargets: DOM-first, conservative text fallback if DOMParser fails
 const sanitizeRelTargets = async (zip) => {
   try {
     const relFiles = Object.keys(zip.files).filter(p => /^word\/_rels\/.*\.rels$/i.test(p));
-    const parser = new DOMParser();
-    const serializer = new XMLSerializer();
-    const CT_NS = "http://schemas.openxmlformats.org/package/2006/relationships";
 
     for (const rf of relFiles) {
-      const txt = await zip.file(rf).async('text');
-      // parse as XML
-      const dom = parser.parseFromString(txt, "application/xml");
-      const pe = dom.getElementsByTagName('parsererror');
-      if (pe && pe.length > 0) {
-        console.warn(`Skipping ${rf}: DOMParser produced parsererror (file may be malformed)`);
-        continue; // do not re-write a broken rel file
-      }
+      try {
+        const txt = await zip.file(rf).async('text');
 
-      const rels = dom.getElementsByTagName('Relationship');
-      let changed = false;
-      for (let i = 0; i < rels.length; i++) {
-        const rel = rels[i];
-        let t = rel.getAttribute('Target') || '';
-        if (!t) continue;
-        // strip leading slash
-        t = t.replace(/^\/+/, '');
-        // if target refers to media/* but not under word/, normalize to media/...
-        // (document rels live in word/_rels so "media/..." is correct relative to word/)
-        if (/^media\//i.test(t) && !/^word\/media\//i.test(t)) {
-          // keep the tail after the first segment, to avoid doubling
-          const tail = t.split('/').slice(1).join('/');
-          if (tail) t = `media/${tail}`;
-        }
-        if (rel.getAttribute('Target') !== t) {
-          const old = rel.getAttribute('Target');
-          rel.setAttribute('Target', t);
-          changed = true;
-          console.log(`Sanitized rel Target in ${rf}: ${old} -> ${t}`);
-        }
-      }
+        // Try structured DOM approach first
+        try {
+          const parser = new DOMParser();
+          const serializer = new XMLSerializer();
+          const dom = parser.parseFromString(txt, "application/xml");
+          const pe = dom.getElementsByTagName('parsererror');
+          if (!pe || pe.length === 0) {
+            // DOM parsed OK -> normalize Relationship Target attributes
+            const rels = dom.getElementsByTagName('Relationship');
+            let changed = false;
+            for (let i = 0; i < rels.length; i++) {
+              const rel = rels[i];
+              let t = rel.getAttribute('Target') || '';
+              if (!t) continue;
 
-      if (changed) {
-        const out = serializer.serializeToString(dom);
-zip.file(rf, ensureXmlDecl(sanitizeXmlBeforeWrite(out)));
+              // strip leading slash(es)
+              t = t.replace(/^\/+/, '');
+
+              // normalize /word/media/... or /media/... -> media/...
+              t = t.replace(/^(?:word\/)?media\//i, (m) => 'media/');
+
+              if (rel.getAttribute('Target') !== t) {
+                const old = rel.getAttribute('Target');
+                rel.setAttribute('Target', t);
+                changed = true;
+                console.log(`Sanitized rel Target in ${rf}: ${old} -> ${t}`);
+              }
+            }
+            if (changed) {
+              const out = serializer.serializeToString(dom);
+              zip.file(rf, sanitizeXmlBeforeWrite(out));
+            }
+            continue; // next rel file
+          }
+          // if parsererror present, fall through to text fallback below
+          console.warn(`DOMParser reported parsererror for ${rf}, will use text fallback`);
+        } catch (domErr) {
+          console.warn(`DOM parse attempt failed for ${rf}:`, domErr);
+          // fall through to text fallback below
+        }
+
+        // Text fallback (conservative): only touch Target="..." attributes,
+        // avoid writing any parsererror HTML back into the ZIP.
+        let fixed = txt.replace(/^\uFEFF/, '').replace(/^\s+/, '');
+
+        // Replace Target="/word/media/xxx" or Target="/media/xxx" -> Target="media/xxx"
+        fixed = fixed.replace(/Target="\/*(?:word\/)?media\//gi, 'Target="media/');
+
+        // Collapse other leading slashes in Targets: Target="/foo/bar" -> Target="foo/bar"
+        fixed = fixed.replace(/Target="\/*([^"]+)"/gi, (m, p1) => `Target="${p1}"`);
+
+        // Ensure we don't accidentally carry HTML parsererror blocks
+        fixed = sanitizeXmlBeforeWrite(fixed);
+
+        // write back sanitized text (ensure xml decl)
+        zip.file(rf, ensureXmlDecl(fixed));
+        console.log(`Applied text-fallback sanitization to ${rf}`);
+      } catch (rfErr) {
+        console.warn(`Failed to sanitize rel file ${rf}:`, rfErr);
       }
     }
   } catch (e) {
-    console.warn("sanitizeRelTargets failed:", e);
+    console.warn("sanitizeRelTargets failed (outer):", e);
   }
 };
+
 
 const ensureContentTypesForMedia = async (zip) => {
   try {
