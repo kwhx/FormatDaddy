@@ -516,25 +516,69 @@ const ensureContentTypesForMedia = async (zip) => {
 };
 
 
-const validateXmlPartsInZip = async (zip) => {
+// Enhanced validator + debug dump
+const validateXmlPartsInZipWithDebug = async (zip) => {
   const parser = new DOMParser();
   const xmlFiles = Object.keys(zip.files).filter(p => p.toLowerCase().endsWith('.xml'));
+  const failures = [];
+
   for (const p of xmlFiles) {
     try {
       const txt = await zip.file(p).async('text');
+      // trim stray bytes before xml declaration
       const start = txt.indexOf('<?xml');
       const clean = start > 0 ? txt.slice(start) : txt;
       const parsed = parser.parseFromString(clean, "application/xml");
       const pe = parsed.getElementsByTagName('parsererror');
       if (pe && pe.length > 0) {
-        const snippet = clean.slice(0, 512).replace(/\n/g, "\\n");
-        console.error('XML parse error in', p, (pe[0].textContent || pe[0].innerText), 'snippet:', snippet);
-        throw new Error('xml-parse-error:' + p);
+        const errText = (pe[0].textContent || pe[0].innerText || pe[0].innerHTML || "").slice(0, 2000);
+        const snippet = clean.slice(0, 4000);
+        console.error(`XML parse error in ${p}: ${errText}`);
+        console.error(`Snippet for ${p}:\n`, snippet);
+        failures.push({ path: p, error: errText, snippet });
       }
     } catch (e) {
-      throw e;
+      // unexpected read/parse failure
+      console.error(`Exception validating ${p}:`, e && e.message ? e.message : e);
+      const txt = (await zip.file(p).async('text').catch(()=>null)) || '';
+      failures.push({ path: p, error: (e && e.message) || String(e), snippet: txt.slice(0,4000) });
     }
   }
+
+  if (failures.length > 0) {
+    // build debug zip for download (so you can inspect on desktop)
+    try {
+      const debugZip = new JSZip();
+      // add failing parts
+      failures.forEach((f, idx) => {
+        debugZip.file(`failures/${idx}-${f.path.replace(/\//g, '_')}.xml`, f.snippet || '');
+      });
+      // add short diagnostic text
+      const diagLines = failures.map(f => `FILE: ${f.path}\nERROR: ${f.error}\n---\n`).join('\n');
+      debugZip.file('diagnostic.txt', diagLines + `\nUser agent: ${navigator.userAgent}\nOriginal file: ${(file && file.name) || 'n/a'}`);
+
+      // add the full generated DOCX (pack the current zip)
+      try {
+        const generatedBlob = await zip.generateAsync({ type: 'blob', compression: 'STORE', streamFiles: false });
+        debugZip.file('generated.docx', generatedBlob);
+      } catch (genErr) {
+        // if packing generated.zip fails, add the textual listing instead
+        debugZip.file('pack-failed.txt', 'Failed to pack generated DOCX: ' + String(genErr));
+      }
+
+      const debugBlob = await debugZip.generateAsync({ type: 'blob' });
+      // Download automatically (works on iPhone Safari as user-initiated code path during button click)
+      saveAs(debugBlob, 'docx-debug.zip');
+      console.warn('Validation failed — downloaded docx-debug.zip with failing parts and generated.docx for inspection.');
+    } catch (dbgErr) {
+      console.error('Failed to build/download debug zip:', dbgErr);
+    }
+
+    // Throw so your existing catch shows the alert and aborts
+    throw new Error('xml-validation-failed: ' + failures.map(f => f.path).join(','));
+  }
+
+  // no failures -> OK
   console.log('All XML parts parsed OK in-memory');
 };
 
@@ -568,7 +612,7 @@ await ensureContentTypesForMedia(zip);
 
 // validate XML parts in-memory (throws if any parse errors)
 try {
-  await validateXmlPartsInZip(zip);
+  await validateXmlPartsInZipWithDebug(zip);
 } catch (validationErr) {
   console.error("Validation failed for generated archive:", validationErr);
   alert("Formatting failed: generated DOCX could not be validated. See console for details.");
