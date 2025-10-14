@@ -361,7 +361,88 @@ writeText("word/document.xml", ensureXmlDecl(updatedDocumentXml));
   }
 
   // 4) Generate new docx blob from zip and produce preview from that same blob
-  
+  // helper: downscale large images inside the zip (client-side)
+const downscaleImagesInZip = async (zip, opts = {}) => {
+  const {
+    maxDimension = 2048,   // largest side (px); lower on mobile
+    minSizeBytes = 150 * 1024 // only downscale images bigger than this
+  } = opts;
+
+  const names = Object.keys(zip.files);
+  for (const name of names) {
+    // only target images inside word/media/
+    const m = name.match(/^word\/media\/(.+)\.(png|jpe?g)$/i);
+    if (!m) continue;
+
+    const ext = m[2].toLowerCase();
+    const file = zip.file(name);
+    if (!file) continue;
+    try {
+      const uint8 = await file.async("uint8array");
+      if (uint8.length < minSizeBytes) continue; // skip small images
+
+      // Build blob with guessed mime (keep same format if possible)
+      const origMime = (ext === "png") ? "image/png" : "image/jpeg";
+      const blob = new Blob([uint8], { type: origMime });
+
+      // createImageBitmap will fail for some exotic images on older Safari; guard it
+      let bitmap;
+      try {
+        bitmap = await createImageBitmap(blob);
+      } catch (err) {
+        console.warn("createImageBitmap failed, skipping downscale:", name, err);
+        continue;
+      }
+
+      // compute scale
+      const largestSide = Math.max(bitmap.width, bitmap.height);
+      if (largestSide <= maxDimension) {
+        bitmap.close && bitmap.close();
+        continue; // no downscale needed
+      }
+
+      const scale = maxDimension / largestSide;
+      const targetW = Math.round(bitmap.width * scale);
+      const targetH = Math.round(bitmap.height * scale);
+
+      // draw to canvas
+      const canvas = document.createElement("canvas");
+      canvas.width = targetW;
+      canvas.height = targetH;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(bitmap, 0, 0, targetW, targetH);
+      bitmap.close && bitmap.close();
+
+      // choose output mime: prefer jpeg for big images to reduce size
+      const outMime = origMime === "image/png" ? "image/png" : "image/jpeg";
+
+      // get the blob (quality param for jpeg)
+      const newBlob = await new Promise((res) => {
+        // use 0.8 quality for jpeg; for PNG type will ignore quality
+        canvas.toBlob(res, outMime, 0.8);
+      });
+      if (!newBlob) {
+        console.warn("canvas.toBlob returned null for", name);
+        continue;
+      }
+
+      const ab = await newBlob.arrayBuffer();
+      // replace the file in the zip with the new ArrayBuffer (binary)
+      zip.file(name, ab, { binary: true });
+
+      console.log(`Replaced ${name}: ${uint8.length} → ${ab.byteLength} bytes`);
+      // small yield so mobile devices don't freeze
+      await new Promise((r) => setTimeout(r, 0));
+    } catch (e) {
+      console.warn("Failed to downscale", name, e);
+      // don't throw — if downscale fails, leave original image in place
+    }
+  }
+};
+// Downscale images (especially for mobile) before packaging
+const imgMaxDim = isLikelyMobile() ? 1400 : 2048;
+await downscaleImagesInZip(zip, { maxDimension: imgMaxDim, minSizeBytes: 120 * 1024 });
+
   // --- ZIP generate + validation (DEFLATE first, fallback to STORE) ---
 try {
   const tryGenerate = async (opts) => {
