@@ -331,7 +331,12 @@ try {
 
 const parser = new DOMParser();
 const docDom = parser.parseFromString(documentXml, "application/xml");
-
+if (docDom.getElementsByTagName("parsererror").length > 0) {
+  console.warn("document.xml failed to parse cleanly; aborting.");
+  alert("Invalid or corrupt DOCX — could not parse document.xml");
+  setStatus("idle");
+  return;
+}
 
   // Apply run + paragraph formatting throughout document.xml (async)
   try {
@@ -353,20 +358,69 @@ const docDom = parser.parseFromString(documentXml, "application/xml");
 };
 writeText("word/document.xml", ensureXmlDecl(updatedDocumentXml));
 
+// right after:
+// const parser = new DOMParser();
+// const serializer = new XMLSerializer();
+
+const tryParseAndSanitize = (rawText, path = '') => {
+  const p = new DOMParser();
+
+  // 1) quick trim to first <?xml if present
+  const idx = rawText.indexOf('<?xml');
+  if (idx > 0) rawText = rawText.slice(idx);
+
+  // 2) remove BOM and leading whitespace
+  rawText = rawText.replace(/^\uFEFF/, '').replace(/^\s+/, '');
+
+  // 3) try parse as-is
+  let doc = p.parseFromString(rawText, "application/xml");
+  if (doc.getElementsByTagName('parsererror').length === 0) {
+    return { ok: true, doc, text: rawText };
+  }
+
+  // 4) remove HTML parsererror wrapper (whole wrapper or inlined fragment)
+  let cleaned = rawText.replace(
+    /^(?:\s*<\?xml[\s\S]*?\?>\s*)?(?:\s*)<html[\s\S]*?<parsererror[\s\S]*?<\/parsererror>[\s\S]*?<\/html>\s*$/i,
+    ''
+  );
+  cleaned = cleaned.replace(/<html[\s\S]*?<parsererror[\s\S]*?<\/parsererror>[\s\S]*?<\/html>/ig, '');
+
+  // Add canonical xml declaration at the start for parsing
+  const withDecl = cleaned.replace(/^\s*(?:<\?xml[\s\S]*?\?>\s*)*/, '<?xml version="1.0" encoding="UTF-8"?>\n');
+
+  doc = p.parseFromString(withDecl, "application/xml");
+  if (doc.getElementsByTagName('parsererror').length === 0) {
+    return { ok: true, doc, text: withDecl };
+  }
+
+  // final: parsing failed — return failure and original rawText so caller can keep original file
+  const pe = doc.getElementsByTagName('parsererror')[0];
+  return { ok: false, error: pe, text: rawText };
+};
+
 // sanitize XML strings before writing to zip
+// stronger sanitizer: remove BOM, remove HTML <parsererror> wrapper even if preceded by xml decl,
+// collapse duplicate xml declarations, and ensure single xml declaration at start.
 const sanitizeXmlBeforeWrite = (xmlString) => {
   if (!xmlString) return '<?xml version="1.0" encoding="UTF-8"?>\n';
-  // If the string contains an HTML parsererror wrapper (from DOMParser errors),
-  // strip that whole wrapper.
-  xmlString = xmlString.replace(/<html[\s\S]*?<parsererror[\s\S]*?<\/parsererror>[\s\S]*?<\/html>/i, "");
-  // Remove any BOM
-  xmlString = xmlString.replace(/^\uFEFF/, "");
-  // collapse multiple XML declarations down to one at start
+
+  //remove BOM
+  xmlString = xmlString.replace(/^\uFEFF/, '');
+
+  //if the string contains an HTML parsererror wrapper (from failed DOMParser.parseFromString),remove it even if there's an XML declaration before it.
+  //this matches optional leading xml decl + the whole <html>.. <parsererror> .. </html> block
+  xmlString = xmlString.replace(
+    /^(?:\s*<\?xml[\s\S]*?\?>\s*)?(?:<!DOCTYPE[\s\S]*?>\s*)?(?:\s*)<html[\s\S]*?<parsererror[\s\S]*?<\/parsererror>[\s\S]*?<\/html>\s*$/i,
+    ''
+  );
+  //ong man, if parsererror appears *inside* the string (not the whole string), remove that fragment.
+  xmlString = xmlString.replace(/<html[\s\S]*?<parsererror[\s\S]*?<\/parsererror>[\s\S]*?<\/html>/ig, '');
+  //lets collapse any leading whitespace + multiple xml declarations into a single canonical declaration
   xmlString = xmlString.replace(/^\s*(?:<\?xml[\s\S]*?\?>\s*)*/, '<?xml version="1.0" encoding="UTF-8"?>\n');
   return xmlString;
 };
 
-// Move media files found at root (media/...) into word/media/ to match rels.
+//moving media files found at root (media/...) into word/media/ to match rels.
 const moveRootMediaIntoWord = async (zip) => {
   try {
     const names = Object.keys(zip.files);
@@ -434,7 +488,7 @@ const sanitizeRelTargets = async (zip) => {
 
       if (changed) {
         const out = serializer.serializeToString(dom);
-        zip.file(rf, sanitizeXmlBeforeWrite(out));
+zip.file(rf, ensureXmlDecl(sanitizeXmlBeforeWrite(out)));
       }
     }
   } catch (e) {
@@ -588,22 +642,52 @@ const validateXmlPartsInZipWithDebug = async (zip) => {
   const headerFiles = fileNames.filter((p) => /^word\/header.*\.xml$/i.test(p));
   const footerFiles = fileNames.filter((p) => /^word\/footer.*\.xml$/i.test(p));
 
-  for (const hf of headerFiles) {
-    const xml = await readText(hf);
-    if (!xml) continue;
-    const dom = parser.parseFromString(xml, "application/xml");
-    await applyFormattingToHeaderFooterDom(dom, font, fontSize, alignment, spacing);
-    const out = serializer.serializeToString(dom);
-    writeText(hf, ensureXmlDecl(out));
+// safer header/footer parse + sanitize + write flow
+for (const hf of headerFiles) {
+  const xml = await readText(hf);
+  if (!xml) continue;
+
+  const parsed = tryParseAndSanitize(xml, hf);
+  if (!parsed.ok) {
+    console.warn(`Failed to parse ${hf} even after sanitization — keeping original (no overwrite).`, parsed.error && parsed.error.textContent);
+    // Do not write broken parsererror HTML back into the zip.
+    continue;
   }
-  for (const ff of footerFiles) {
-    const xml = await readText(ff);
-    if (!xml) continue;
-    const dom = parser.parseFromString(xml, "application/xml");
+
+  // parsed.doc is a safe DOM we can modify
+  const dom = parsed.doc;
+  try {
     await applyFormattingToHeaderFooterDom(dom, font, fontSize, alignment, spacing);
-    const out = serializer.serializeToString(dom);
-    writeText(ff, ensureXmlDecl(out));
+  } catch (e) {
+    console.warn(`applyFormattingToHeaderFooterDom failed for ${hf}:`, e);
+    // If formatting fails, keep original instead of writing broken output
+    continue;
   }
+  const out = new XMLSerializer().serializeToString(dom);
+  zip.file(hf, ensureXmlDecl(sanitizeXmlBeforeWrite(out)));
+}
+
+for (const ff of footerFiles) {
+  const xml = await readText(ff);
+  if (!xml) continue;
+
+  const parsed = tryParseAndSanitize(xml, ff);
+  if (!parsed.ok) {
+    console.warn(`Failed to parse ${ff} even after sanitization — keeping original (no overwrite).`, parsed.error && parsed.error.textContent);
+    continue;
+  }
+
+  const dom = parsed.doc;
+  try {
+    await applyFormattingToHeaderFooterDom(dom, font, fontSize, alignment, spacing);
+  } catch (e) {
+    console.warn(`applyFormattingToHeaderFooterDom failed for ${ff}:`, e);
+    continue;
+  }
+  const out = new XMLSerializer().serializeToString(dom);
+  zip.file(ff, ensureXmlDecl(sanitizeXmlBeforeWrite(out)));
+}
+
 
   // ensure media lands in word/media/ and rels/content-types are consistent:
 await moveRootMediaIntoWord(zip);
