@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- /public/logo-formatdaddy-left.svg -->
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 300 80"
+     role="img"
+     aria-labelledby="logoTitle logoDesc">
+  <title id="logoTitle">FormatDaddy</title>
+  <desc id="logoDesc">formatDaddy — your assignment's final touch</desc>
+
+  <!-- LEFT-ALIGNED brand word (starts at x=10 to give a little breathing room) -->
+  <text
+    x="8"
+    y="36"
+    font-family="Poppins, Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+    font-weight="700"
+    font-style="italic"
+    font-size="30"
+    fill="#d11614"
+    text-anchor="start"
+  >
+    formatDaddy
+  </text>
+
+  <!-- Tagline: positioned using text-anchor="middle" so it centers at x=125 -->
+  <!-- Tweak the x value (e.g. 120 / 125 / 130) if you need micro-adjustments -->
+  <text
+    x="97"
+    y="60"
+    font-family="Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+    font-weight="500"
+    font-size="12"
+    fill="#9ea5ab"
+    letter-spacing="0.01em"
+    text-anchor="middle"
+  >
+    your assignment's final touch
+  </text>
+</svg>

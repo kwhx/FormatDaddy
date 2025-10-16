@@ -1,0 +1,7 @@
+/* src/styles/ToolWrapper.module.css */
+.engineWrap {
+  min-height: 100vh;
+  width: 100%;
+  background: transparent;
+  /* keep layout intact for your engine which uses Home.module.css */
+}
