@@ -330,13 +330,13 @@ Try it now, join the movement or get in early and help own the next privacy-firs
             </div>
 
             <div className={styles.footerCenter}>
-              <div className={styles.footerCopy}>© 2025 FormatDaddy — Privacy-first tools</div>
+              <div className={styles.footerCopy}>© 2025 FormatDaddy. All Rights Reserved.</div>
               <div className={styles.privacyLine}>Your document never leaves your device.</div>
             </div>
 
             <div className={styles.footerRight}>
               <div className={styles.owner}>
-                Owner:{" "}
+                Team{" "}
                 <a href={OWNER_GITHUB} target="_blank" rel="noopener noreferrer" className={styles.ownerLink}>
                   0xrootAnon
                 </a>
