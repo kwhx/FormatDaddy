@@ -203,7 +203,7 @@
 
 @media (max-width: 740px) {
   .logoImage {
-    width: 140px; /* smaller on phones */
+    width: 370px; /* smaller on phones */
   }
 
   /* If you removed the nav on mobile keep brand spacing neat */
@@ -256,7 +256,7 @@
   }
 
   .logoImage {
-    width: 140px; /* mobile size */
+    width: 370px; /* mobile size */
   }
 
   .brandText {
@@ -310,7 +310,7 @@
   .header .brand .brandText { display: none !important; }
 
   .header .brand > .logo .logoImage,
-  .header .brand > .logo img.logoImage { width: 140px !important; }
+  .header .brand > .logo img.logoImage { width: 370px !important; }
 }
 
 @media (min-width: 981px) {
@@ -326,7 +326,7 @@
 
 @media (max-width: 740px) {
   #formatdaddy-logo { position: static; text-align:center; margin: 0 auto; }
-  #formatdaddy-logo img { width: 140px; }
+  #formatdaddy-logo img { width: 370px; }
   .header .brand .brandText { display:none; }
 }
 
@@ -371,7 +371,7 @@
     justify-content: center !important;
   }
 
-  #formatdaddy-logo img { width: 140px !important; height: auto !important; }
+  #formatdaddy-logo img { width: 370px !important; height: auto !important; }
   .header .brand { justify-content: center !important; }
   .header .brand .brandText { display: none !important; }
 }
@@ -394,7 +394,7 @@
     justify-content: center !important;
   }
 
-  #formatdaddy-logo img { width: 140px !important; height: auto !important; }
+  #formatdaddy-logo img { width: 370px !important; height: auto !important; }
 }
 
 /* ============================
@@ -429,7 +429,7 @@
 
   /* Header: keep nav hidden and center the brand */
   .header {
-    padding: 12px 12px !important;
+    padding: 38px 12px 1px !important;
   }
   .brand {
     justify-content: center !important;

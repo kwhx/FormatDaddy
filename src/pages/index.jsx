@@ -147,6 +147,7 @@ useEffect(() => {
 
 // add (or paste) inside your Landing component, near other useEffect calls
 
+
 // REPLACE the existing useEffect that adjusts the logo offset with this block
 useEffect(() => {
   if (typeof window === "undefined") return;
@@ -167,7 +168,7 @@ useEffect(() => {
       logoWrap.style.setProperty("z-index", "", "important");
       // ensure image uses mobile width
       const img = logoWrap.querySelector("img");
-      if (img) img.style.setProperty("width", "140px", "important");
+      if (img) img.style.setProperty("width", "370px", "important");
       return;
     }
 
@@ -243,7 +244,11 @@ useEffect(() => {
         <header className={styles.header}>
           <div className={styles.brand}>
 <div id="formatdaddy-logo" className={styles.logo}>
+  <picture>
+    <source media="(min-width:320px) and (max-width:425px)" srcSet="/logo-formatdaddy-centered.svg" />
+    {/* fallback/desktop */}
   <img src="/logo-formatdaddy.svg" alt="FormatDaddy: your assignment's final touch" className={styles.logoImage} />
+  </picture>
 </div>
           </div>
 
@@ -293,7 +298,7 @@ useEffect(() => {
           </section>
 
           {/* BELOW-FOLD sections — they start hidden and reveal on scroll */}
-          <section id="about" className={`${styles.about} ${styles.reveal}`}>
+          <section id="about" className={`${styles.about} ${styles.reveal} ${styles.revealed}`}>
             <div className={styles.containerInner}>
               <h2>About FormatDaddy</h2>
               <p className={styles.muted}>
@@ -308,7 +313,7 @@ Try it now, join the movement or get in early and help own the next privacy-firs
             </div>
           </section>
 
-          <section id="how" className={`${styles.how} ${styles.reveal}`}>
+          <section id="how" className={`${styles.how} ${styles.reveal} ${styles.revealed}`}>
             <div className={styles.containerInner}>
               <h3>How it works</h3>
               <ol>

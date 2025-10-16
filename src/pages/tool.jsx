@@ -11,7 +11,7 @@ export default function ToolPage() {
   return (
     <>
       <Head>
-        <title>FormatDaddy — Tool</title>
+        <title>FormatDaddy</title>
       </Head>
 
       <PasswordGate>
