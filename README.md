@@ -48,7 +48,7 @@ Built entirely on the client side using **Next.js**, **Mammoth.js**, and **docx.
 
 ###  Run Locally  
 ```bash
-git clone https://github.com/<your-username>/formatdaddy
+git clone https://github.com/kwhx/formatdaddy
 cd formatdaddy
 npm install
 npm run dev
